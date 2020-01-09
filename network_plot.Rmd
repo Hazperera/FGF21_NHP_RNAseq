@@ -1,0 +1,755 @@
+---
+title: "figure2_wgcna_network"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+```{r setup, results='hide', message=FALSE}
+# Load go-to libraries
+library(ggplot2); theme_set(theme_bw(14) + 
+                theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+                theme(legend.key = element_blank()))
+library(ggrepel)
+library(RColorBrewer)
+library(data.table)
+library(stringr)
+library(tidyr)
+# library(limma)
+# library(edgeR)
+# library(heatmap.plus)
+# library(heatmap3)
+library(knitr)
+library(rgl)
+#library(pca3d)
+#library(WGCNA)
+library(gridExtra)
+library(dplyr)
+
+
+
+# packages for this particular script
+# library(tidyverse)
+library(igraph)
+library(arules)
+
+
+
+
+# Markdown options
+options(stringsAsFactors = FALSE, row.names=FALSE)
+opts_chunk$set(fig.width=8, fig.height=8, cache = TRUE, echo=FALSE, warning=FALSE, message=FALSE, error=FALSE, strip.white = FALSE, fig.align = 'left')
+
+
+
+##### Working from #####
+
+whereIam <- str_split_fixed(getwd(),"PROJECTS",  2)[1] 
+
+
+# load some generic functions
+
+# load functions for this particular script
+
+
+# add a page break with \newpage
+# add a blank line with \newline  or &nbsp; or <br>
+```
+
+<!-- ## Figure 2. Adipose gene module network -->
+
+<!-- ```{r data, echo=TRUE} -->
+
+<!-- ### read in files and attach new module numbers -->
+
+<!-- AT.mod.names <- read.csv("Results/WGCNA/All Genes log2/AT.mod.numbers.csv") -->
+
+<!-- # Module membership = which genes are in which modules -->
+<!-- AT.MM <- read.delim(file = 'Module Network/Adipose/AT.allgenes.Mods.csv', sep  = ",") -->
+<!-- AT.mods <- AT.MM[,c(2,4,5,6)] -->
+<!-- AT.mods <- merge(AT.mod.names, AT.mods[,c(2:4)], by="moduleColor") -->
+
+
+<!-- # Module eigengene expression -->
+<!-- AT.MEs <- read.csv("Results/WGCNA/All Genes log2/AT.allgenes.MEexp.csv") -->
+<!-- AT.MEs <- AT.MEs[,c(1,match(AT.mod.names$Module, colnames(AT.MEs)))] -->
+<!-- names(AT.MEs) <- c("SampleID", AT.mod.names$modNumber) -->
+
+
+
+<!-- # edges = correlation and distance between pairs of nodes/modules -->
+<!-- edges <- read.delim(file = 'Module Network/Adipose/AT.Network.edges.csv', sep  = ",") -->
+<!-- edges <- edges %>% left_join(AT.mod.names[,c("Module", "modNumber")], by=c("Mod1"="Module")) %>% -->
+<!--                     rename(Mod1_modNumber = modNumber) %>% -->
+<!--                     left_join(AT.mod.names[,c("Module", "modNumber")], by=c("Mod2"="Module")) %>% -->
+<!--                     rename(Mod2_modNumber = modNumber) -->
+
+
+
+
+
+<!-- ## node attributes = assoc with % change BW, Pre vs Post, number of genes in module -->
+<!-- nodeAtt <- read.delim(file = "Module Network/Adipose/AT.Network.nodes2.csv", sep  = ",") -->
+
+<!-- # add in bins for node size -->
+<!-- summary(nodeAtt$modSize) -->
+<!-- nodeAtt$modSizeBin <- ifelse(nodeAtt$modSize < 50, "< 50", -->
+<!--                           ifelse(nodeAtt$modSize < 200 & nodeAtt$modSize >= 50, "50-200",  -->
+<!--                                   ifelse(nodeAtt$modSize < 500 & nodeAtt$modSize >= 200, "200-500", -->
+<!--                                         ifelse(nodeAtt$modSize >= 500, "> 500",NA )))) -->
+
+<!-- # add in bins for node color, based on strength and direction of association with BW  -->
+<!-- BW.assoc <- read.csv("Results/WGCNA/All Genes log2/LMresults.AT.treat.BW.TAG.maxCh.csv") -->
+<!-- nodeAtt <- merge(nodeAtt, BW.assoc[,c("Module", "BW.Est" )], by=) -->
+<!-- nodeAtt$modColorBin <- ifelse(nodeAtt$BW.adjPval >= .25,  "#ffffcc",  # pale yellow -->
+<!--                             ifelse(nodeAtt$BW.adjPval < .25 & nodeAtt$BW.adjPval > .2 & nodeAtt$BW.Est < 0, "#80cdc1",  # light turquoise -->
+<!--                                    ifelse(nodeAtt$BW.adjPval < .2 & nodeAtt$BW.Est < 0, "#018571", # dark turq -->
+<!--                                           ifelse(nodeAtt$BW.adjPval < .25 & nodeAtt$BW.adjPval > .2 & nodeAtt$BW.Est > 0, "#fe9929", # light orange -->
+<!--                                                  ifelse(nodeAtt$BW.adjPval < .2 & nodeAtt$BW.Est > 0, "#993404", NA)))))  # dark orange -->
+
+<!-- # "#ffffcc", "#80cdc1" , "#018571", "#fe9929", "#993404" -->
+<!-- ``` -->
+
+
+
+<!-- ## Filter down to desired nodes and edges -->
+
+<!-- ```{r nodes_edges, echo=TRUE} -->
+
+<!-- # which nodes to include -->
+<!-- include <- c("grey60", "turquoise", "darkred", "coral", "salmon", -->
+<!--                  "coral3", "violet", "darkolivegreen", "honeydew", -->
+<!--                  "firebrick4", "pink", "cyan", "steelblue", "coral1", "mediumorchid", -->
+<!--                  "palevioletred2") -->
+
+
+<!-- nodeAtt %>% filter(moduleColor %in% include) %>% -->
+<!--             select(modNumber, BW.adjPval, PostvPre.adjP, modSize, modSizeBin, modColorBin) -> nodes_cl -->
+<!-- table(nodes_cl$modSizeBin) -->
+<!-- table(nodes_cl$modColorBin) -->
+
+<!-- # threshold for plotting edges, change to include the edges you want -->
+<!-- edgeCor = 0.5 -->
+<!-- edgePval = .05 -->
+
+<!-- # put correct module names as first columns!! -->
+<!-- edges %>% -->
+<!--   filter(abs(Cor) > edgeCor, adjPval < edgePval) %>% -->
+<!--   filter(Mod1_modNumber %in% nodes_cl$modNumber & Mod2_modNumber %in% nodes_cl$modNumber ) %>% -->
+<!--   select(Mod1_modNumber, Mod2_modNumber, Cor, Pval, adjPval, distance)  -> edges_cl -->
+
+<!-- ``` -->
+
+
+<!-- ## build graph  -->
+
+<!-- ```{r graph, echo=TRUE} -->
+
+<!-- g <- graph_from_data_frame(d = edges_cl, vertices = nodes_cl, directed = F) -->
+
+<!-- ``` -->
+
+
+<!-- ## Set the visual properties of the graph -->
+
+<!-- ```{r plot_graph, echo=TRUE} -->
+
+<!-- # # color based on module color name -->
+<!-- # V(g)$color <- V(g)$name -->
+
+<!-- # # node color based on assoc with change in BW  ( hex colors from colorbrewer2.org) -->
+<!-- # # bins w/o direction of association -->
+<!-- # arules::discretize(V(g)$BW.adjPval * 100, breaks = 4) -> ff -->
+<!-- # V(g)$color <- c("#225ea8", "#41b6c4",  "#a1dab4", "#ffffcc")[match(as.vector(ff), levels(ff))] -->
+
+<!-- # node color based on strenth and direction of association with body weight ( hex colors from colorbrewer2.org) -->
+<!-- V(g)$color <- nodes_cl$modColorBin -->
+
+
+
+<!-- # or... -->
+<!-- # Node color based on annotation of module...? -->
+<!-- # -->
+<!-- # -->
+<!-- # -->
+
+
+<!-- # node label color -->
+<!-- V(g)$label.color <- "black" -->
+<!-- V(g)$label.cex <- 0.8 -->
+
+<!-- # node size based on number of genes in modules -->
+<!-- # arules::discretize(V(g)$modSize / 25, breaks = 4) -> ff -->
+<!-- # V(g)$size <- 19+c(2,4,8,16)[match(as.vector(ff), levels(ff))] -->
+<!-- V(g)$size <- 19+c(2,4,8,16)[match(as.vector(nodes_cl$modSizeBin), unique(nodes_cl$modSizeBin))] -->
+
+
+<!-- # edge color -->
+<!-- E(g)$color <- c( "red4", "#00295b") [(E(g)$Cor > 0)+1]  # dark red and dark blue -->
+
+<!-- # edge width - use 1- distance to make stronger orrelations (neg or pos) fatter -->
+<!-- E(g)$width <- 4 -->
+
+
+<!-- # plot without layout -->
+<!-- plot(g, edge.curved = .1) -->
+
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+
+<!-- # # plot with layout -->
+<!-- # plot(g, edge.curved = .1, -->
+<!-- #      layout=layout_nicely) -->
+<!-- #  -->
+<!-- # plot(g, edge.curved = .1, -->
+<!-- #      layout=layout_with_dh) -->
+<!-- #  -->
+<!-- # plot(g, edge.curved = .1, -->
+<!-- #      layout=layout_with_drl) -->
+<!-- #  -->
+<!-- # plot(g, edge.curved = .1, -->
+<!-- #      layout=layout_with_gem) -->
+<!-- #  -->
+<!-- # plot(g, edge.curved = .1, -->
+<!-- #      layout=layout_with_graphopt) -->
+<!-- #  -->
+<!-- # plot(g, edge.curved = .1, -->
+<!-- #      layout=layout_with_fr) -->
+<!-- #  -->
+<!-- # plot(g, edge.curved = .1, -->
+<!-- #      layout=layout_with_lgl) -->
+<!-- #  -->
+<!-- # #MDS, which i think is the only distance-based layout -->
+<!-- # plot(g, edge.curved = .1, -->
+<!-- #      layout=layout_with_mds) -->
+<!-- #  -->
+<!-- # # try including distance calculated from correlation. -->
+<!-- # # use edge list + distance as distance matrix -->
+<!-- # dist.mat <- as.matrix(edges_cl[,c(1,2,6)]) -->
+<!-- # LO <- layout_with_mds(g, dist=dist.mat) -->
+<!-- # plot(g, edge.curved = .1, layout=LO) -->
+
+
+
+
+<!-- ``` -->
+<!-- ## lots of network plots, hope that one looks clear enough for figure!   -->
+<!-- ### These are all the same - lgl layout -->
+<!-- ```{r} -->
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- # color legend -->
+<!-- legend(x=-1.25, y=-1.25, c("-   | <.2", "-   | <.25", "NA | >.25", "+   | <.25", "+   | <.2"), pch=21, -->
+<!--        col="#303030", pt.bg=c("#018571", "#80cdc1" ,  "#ffffcc", "#fe9929", "#993404"), pt.cex=2, cex=.8, bty="n", ncol=1) -->
+
+<!-- # size legend -->
+<!-- legend(x=.5, y=-1.25, c(unique(nodes_cl$modSizeBin)), pch=21, -->
+<!--        col="#303030", pt.bg="#ffffcc", pt.cex=c(2.5,3,3.5,4), cex=.8, bty="n", ncol=1) -->
+
+
+<!-- ``` -->
+
+
+## Note: will not be making full network plot of all adipose modules- too busy!
+
+
+## Figure S2. Full muscle gene module network
+
+```{r data, echo=TRUE}
+
+### read in files and attach new module numbers
+nodeAtt <- read.delim(file = "Module Network/Muscle/SM.Gas.NEW.Network.nodes.csv", sep  = ",")
+
+# Module membership = which genes are in which modules
+SM.MM <- read.delim(file = 'Results/WGCNA/All Genes log2/Gas.allgenes.Mods.csv', sep  = ",")
+SM.mods <- SM.MM[,c(2,4,5,6)]
+SM.mods <- merge(nodeAtt[,c(2:3)], SM.mods[,c(2:4)], by="moduleColor")
+# unique(SM.mods$modNumber)
+
+# Module eigengene expression
+SM.MEs <- read.csv("Results/WGCNA/All Genes log2/Gas.allgenes.MEexp.csv")
+SM.MEs <- SM.MEs[,c(1,match(nodeAtt$Module, colnames(SM.MEs)))]
+names(SM.MEs) <- c("SampleID", nodeAtt$modNumber)
+
+
+
+# edges = correlation and distance between pairs of nodes/modules
+edges <- read.delim(file = 'Module Network/Muscle/Gas.Network.edges.csv', sep  = ",")
+edges <- edges %>% left_join(nodeAtt[,c("Module", "modNumber")], by=c("Mod1"="Module")) %>%
+                    rename(Mod1_modNumber = modNumber) %>%
+                    left_join(nodeAtt[,c("Module", "modNumber")], by=c("Mod2"="Module")) %>%
+                    rename(Mod2_modNumber = modNumber)
+  
+  
+
+# add in bins for node size
+summary(nodeAtt$modSize)
+nodeAtt$modSizeBin <- ifelse(nodeAtt$modSize < 50, "< 50",
+                          ifelse(nodeAtt$modSize < 200 & nodeAtt$modSize >= 50, "50-200", 
+                                  ifelse(nodeAtt$modSize < 500 & nodeAtt$modSize >= 200, "200-500",
+                                        ifelse(nodeAtt$modSize >= 500, "> 500",NA ))))
+table(nodeAtt$modSizeBin)
+
+## !! This part excluded because none of the modules changed in association with change in BW
+# # add in bins for node color, based on strength and direction of association with BW 
+# BW.assoc <- read.csv("Results/WGCNA/All Genes log2/LMresults.SM.treat.BW.TAG.maxCh.csv")
+# nodeAtt <- merge(nodeAtt, BW.assoc[,c("Module", "BW.Est" )], by=)
+# nodeAtt$modColorBin <- ifelse(nodeAtt$BW.adjPval >= .25,  "#ffffcc",  # pale yellow
+#                             ifelse(nodeAtt$BW.adjPval < .25 & nodeAtt$BW.adjPval > .2 & nodeAtt$BW.Est < 0, "#80cdc1",  # light turquoise
+#                                    ifelse(nodeAtt$BW.adjPval < .2 & nodeAtt$BW.Est < 0, "#018571", # dark turq
+#                                           ifelse(nodeAtt$BW.adjPval < .25 & nodeAtt$BW.adjPval > .2 & nodeAtt$BW.Est > 0, "#fe9929", # light orange
+#                                                  ifelse(nodeAtt$BW.adjPval < .2 & nodeAtt$BW.Est > 0, "#993404", NA)))))  # dark orange
+
+# "#ffffcc", "#80cdc1" , "#018571", "#fe9929", "#993404"
+```
+
+
+
+## Filter down to desired nodes and edges
+
+```{r nodes_edges, echo=TRUE}
+
+# include all nodes for full skeletal muscle network plot,
+# or... since they're all so highly connected, only include well-annotated modules
+
+# also consider taking out yellow4, as it has no correlations stronger than .5
+# Add in later in inkscape, because unconnected module makes network layout weird
+
+#weak adipogenesis annotation: "antiquewhite4", "blue", "darkolivegreen"
+# took out protein translation modules - too general - "black", "green"
+
+nodeAtt %>% filter(moduleColor %in% c("bisque4", "lightgreen", "royalblue",  "orange", "lightpink4", "turquoise", "darkorange", "darkgreen", "darkred", "greenyellow", "thistle1", "skyblue1",  "mediumpurple2" )) %>%
+  select(modNumber,  PostvPre.adjP, modSize, modSizeBin) -> nodes_cl
+table(nodes_cl$modSizeBin)
+
+
+# threshold for plotting edges, change to include the edges you want
+# edgeCor = 0.5
+# edgePval = .05
+
+# the above values leave a ton of connections between nodes, perhaps too many.  Try stricter cutoff
+edgeCor = 0.5
+edgePval = .05
+
+
+# put correct module names as first columns!!
+edges %>%
+  filter(abs(Cor) > edgeCor, adjPval < edgePval) %>%
+  filter(Mod1_modNumber %in% nodes_cl$modNumber & Mod2_modNumber %in% nodes_cl$modNumber ) %>%
+  select(Mod1_modNumber, Mod2_modNumber, Cor, Pval, adjPval, distance)  -> edges_cl
+
+
+# figure out hub modules
+a <- as.data.frame(table(edges$Mod1))
+b <- as.data.frame(table(edges$Mod2))
+hubs <- data.frame(Module=a$Var1, Freq=a$Freq + b$Freq)
+
+hubs %>% arrange(desc(Freq))
+
+
+
+
+```
+
+
+## build graph 
+
+```{r graph, echo=TRUE}
+
+g <- graph_from_data_frame(d = edges_cl, vertices = nodes_cl, directed = F)
+
+
+```
+
+
+## Set the visual properties of the graph
+
+```{r plot_graph, echo=TRUE}
+
+# # color based on module color name
+# V(g)$color <- V(g)$name
+
+# # node color based on assoc with change in BW  ( hex colors from colorbrewer2.org)
+# # bins w/o direction of association
+# arules::discretize(V(g)$BW.adjPval * 100, breaks = 4) -> ff
+# V(g)$color <- c("#225ea8", "#41b6c4",  "#a1dab4", "#ffffcc")[match(as.vector(ff), levels(ff))]
+
+# # node color based on strenth and direction of association with body weight ( hex colors from colorbrewer2.org)
+# V(g)$color <- nodes_cl$modColorBin
+
+# nodes all one color b/c not associated with change in BW?
+V(g)$color <- "#ffffcc"
+
+# or...
+# Node color based on annotation of module...?
+#
+#
+#
+
+
+# node label color
+V(g)$label.color <- "black"
+V(g)$label.cex <- 0.8   # used .8 for AT plot
+
+# node size based on number of genes in modules
+# arules::discretize(V(g)$modSize / 25, breaks = 4) -> ff
+# V(g)$size <- 19+c(2,4,8,16)[match(as.vector(ff), levels(ff))]
+
+# first attempt, same as for AT plot:
+# V(g)$size <- 19+c(2,4,8,16)[match(as.vector(nodes_cl$modSizeBin), unique(nodes_cl$modSizeBin))]
+# that's perhaps too big because modules are so highly correlated
+
+V(g)$size <- 16+c(16,12,8,4)[match(as.vector(nodes_cl$modSizeBin), unique(nodes_cl$modSizeBin))]
+
+
+# edge color
+E(g)$color <- c( "red4", "#00295b") [(E(g)$Cor > 0)+1]  # dark red and dark blue
+
+# edge width - use 1- distance to make stronger orrelations (neg or pos) fatter
+E(g)$width <- 4
+
+
+# plot without layout
+plot(g, edge.curved = .1)
+
+```
+
+
+```{r}
+
+# # try plotting with various layout
+
+plot(g, edge.curved = .1,
+     layout=layout_nicely)
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh)  # good
+
+plot(g, edge.curved = .1,
+     layout=layout_with_drl)
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem)  #good
+
+plot(g, edge.curved = .1,
+     layout=layout_with_graphopt)
+
+plot(g, edge.curved = .1,
+     layout=layout_with_fr)
+
+plot(g, edge.curved = .1,
+     layout=layout_with_lgl)
+
+#MDS, which i think is the only distance-based layout
+plot(g, edge.curved = .1,
+     layout=layout_with_mds)
+
+# # try including distance calculated from correlation.
+# # use edge list + distance as distance matrix
+# dist.mat <- as.matrix(edges_cl[,c(1,2,6)])
+# LO <- layout_with_mds(g, dist=dist.mat)
+# plot(g, edge.curved = .1, layout=LO)
+
+```
+
+# Plots with dh layout  
+
+```{r}
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_dh) 
+
+```
+
+# plots with gem layout  
+
+```{r}
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+
+plot(g, edge.curved = .1,
+     layout=layout_with_gem) 
+```
+
+
+
+
+<!-- ## a bunch of plots w/o layout -->
+<!-- ```{r} -->
+
+<!-- plot(g, edge.curved = .1) -->
+
+<!-- plot(g, edge.curved = .1) -->
+
+<!-- plot(g, edge.curved = .1) -->
+
+<!-- plot(g, edge.curved = .1) -->
+
+<!-- plot(g, edge.curved = .1) -->
+
+<!-- plot(g, edge.curved = .1) -->
+
+<!-- plot(g, edge.curved = .1) -->
+
+<!-- plot(g, edge.curved = .1) -->
+
+
+
+
+<!-- ``` -->
+
+<!-- # a bunch of plots with layout nicely -->
+<!-- ```{r} -->
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_nicely) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_nicely) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_nicely) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_nicely) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_nicely) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_nicely) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_nicely) -->
+
+
+<!-- ``` -->
+
+
+<!-- # a bunch of plots with layout fr -->
+<!-- ```{r} -->
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_fr) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_fr) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_fr) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_fr) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_fr) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_fr) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_fr) -->
+
+
+<!-- ``` -->
+
+<!-- # a bunch of plots with layout lgl -->
+
+<!-- ```{r} -->
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- plot(g, edge.curved = .1, -->
+<!--      layout=layout_with_lgl) -->
+
+<!-- ``` -->

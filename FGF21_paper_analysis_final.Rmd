@@ -1,0 +1,2949 @@
+  ---
+title: "FGF21-treated NHP RNAseq analysis code for publication"
+author: "Sara Murray"
+date: "June 6, 2017"
+output:
+  pdf_document: 
+    toc: yes
+    toc_depth: 4
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+---
+# Re-analysis and write-up of FGF21-treated NHP RNAseq data for publication
+
+*Note - this markdown is based on the file 'FGF21 and CalR CorNames2.Rmd', but cleaned up to contain only those analyses included in the paper.*
+
+## Previously steps   
+**QC and initial exploration with PCA**- check for batch effects, quality effects/outliers, and mixed up samples.
+
+
+## Summary
+**Goals**  
+
+**Samples**
+RNAseq from FGF21-treated NHP;  Pre, post, and wash-out time points; subq fat and gastrocnemius muscle
+
+**Analysis:** 
+
+**1. Analysis of FGF21-treated samples**
+  - DE gene expression with limma, p.hyper gene set enrichment
+  - Gene set analysis with limma
+  
+**2. WGCNA network analysis**   
+  - using obesity and metabolism-relevant gene sets to get story for publication
+  - using all genes to pull out genes/pathways/extracellular proteins associated with FGF21 Treatment  
+  
+**3. Analysis of phenotypical data **  
+  - gene signatures for percent change in bodyweight
+  
+**Results**  
+
+
+
+```{r load packages, results='hide', message=FALSE, echo=FALSE} 
+
+# Load go-to libraries
+library(ggplot2); theme_set(theme_bw(14) + 
+                theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+                theme(legend.key = element_blank()))
+library(RColorBrewer)
+library(data.table)
+library(stringr)
+library(tidyr)
+library(limma)
+library(edgeR)
+library(heatmap.plus)
+library(heatmap3)
+library(knitr)
+# library(rgl)
+library(heatmap.plus)
+library(heatmap3)
+library(WGCNA)
+library(gridExtra)
+library(dplyr)
+
+
+options(stringsAsFactors = FALSE)
+opts_chunk$set(fig.width=8, fig.height=4, cache = TRUE, echo=FALSE, warning=FALSE, message=FALSE, error=FALSE, strip.white = FALSE, fig.align = 'left')
+
+##### Working from #####
+
+whereIam <- str_split_fixed(getwd(),"PROJECTS",  2)[1] 
+
+# load some generic functions
+source(paste0(whereIam, "R stuff/Functions_general.R"))
+source(paste0(whereIam, "PROJECTS/Genes/phyper GS enrichment.2.R"))
+
+# load functions for this particular script
+source("FGF21 functions.R")
+
+# add a page break with \newpage
+# add a blank line with \newline  or &nbsp; or <br>
+
+
+```
+
+
+
+```{r Read in data files}
+
+
+
+rawCountsPlusQC <- as.data.frame(read.csv("Data/FGF21_musc_fat_rawCounts.csv"))
+names(rawCountsPlusQC)[1] <- "MMG"
+rawCountsPlusQC <- rawCountsPlusQC %>%  select(MMG, 1:(ncol(rawCountsPlusQC)-1))  
+
+colnames(rawCountsPlusQC) <- gsub("US-", "US.", colnames(rawCountsPlusQC))
+# head(rawCountsPlusQC[,1:10])
+
+# There are some QC metrics bundled with the counts file - find them and pull them out
+#row.names(tail(rawCountsPlusQC,10))
+QC1 <- rawCountsPlusQC %>% filter(MMG %in% c("N_ambiguous", "N_multimapping", "N_noFeature",  "N_unmapped" ))
+# dim(QC1)
+# head(QC1[,1:10])
+names(QC1)[1] <- "Metric"
+rownames(QC1) <- QC1$Metric
+QC1 <- as.data.frame(t(QC1))
+QC1 <- QC1[-1,]
+QC1$SampleID <- rownames(QC1)
+
+
+# separate counts from QC
+rawCounts <- rawCountsPlusQC %>% filter(!MMG %in% c("N_ambiguous", "N_multimapping", "N_noFeature",  "N_unmapped" ))
+rownames(rawCounts) <- rawCounts$MMG
+
+# read in more QC
+QC2 <- read.csv("Data/FGF.combinedQC_NT.csv")
+names(QC2)[1] <- "SampleID"
+
+QC2$SampleID <- gsub("US-", "US.", QC2$SampleID)
+QC1$SampleID <- gsub("US-", "US.", QC1$SampleID)
+
+QC <- merge(QC1, QC2, by="SampleID")
+
+
+
+# read in sample annotation (includes treatment groups plus sex, starting weight)
+anno <- read.csv("Data/sample_annotation_final.csv")
+
+annoQC <- merge(anno, QC, by="SampleID")
+
+# put anno and counts in same order
+annoQC <- annoQC[order(annoQC$SampleID),]
+rawCounts <- rawCounts[,match(c("MMG", annoQC$SampleID), colnames(rawCounts))]
+
+# calculate library size and % reads mapped
+annoQC[,8:11] <- apply(annoQC[,8:11], 2, as.numeric)
+annoQC$libsize <- colSums(rawCounts[,-1])
+annoQC$PctReadsMapped <- (annoQC$libsize/(annoQC$libsize+annoQC$N_ambiguous+annoQC$N_unmapped))*100
+
+
+```
+
+
+## Sample QC  
+Here we see there are three samples that have low library size (total read counts) and lower percentage of reads that successfully mapped to the reference genome. Because library quality can adversely affect gene expression readout, we will remove these three samples from the analysis.  *These plots are not included in the paper*  
+
+
+```{r Library QC, fig.height=4, fig.width=6}
+
+
+rawCounts <- rawCounts[,match(c("MMG", annoQC$SampleID), colnames(rawCounts))]
+# all(annoQC$SampleID == colnames(rawCounts)[-1])
+
+# 1) percent aligned ("pctUniquelyMappedReads") vs total reads/libsize
+ggplot(annoQC, aes(x=pctUniquelyMappedReads, y=libsize, color=Treatment, shape=Tissue))+
+  geom_point(size=4, alpha=.7)+
+  ylim(1e+6,2.5e+7)+
+  xlim(0, 100)+
+  geom_hline(yintercept = 10e+6, lty = "dotted")+
+  geom_vline(xintercept = 75, lty = "dotted")+
+  ggtitle("Library quality assessment")+
+  geom_text(data=annoQC[annoQC$PctReadsMapped < 70 | annoQC$libsize >3e7,],
+             aes(label=SampleID), size=3, vjust=0, hjust=.9, colour="black")
+
+ggplot(annoQC, aes(x=PctReadsMapped, y=libsize, color=Treatment, shape=Tissue))+
+  geom_point(size=4, alpha=.7)+
+  ylim(1e+6,2.5e+7)+
+  xlim(0, 100)+
+  geom_hline(yintercept = 10e+6, lty = "dotted")+
+  geom_vline(xintercept = 75, lty = "dotted")+
+  ggtitle("Library quality assessment") +
+  geom_text(data=annoQC[annoQC$PctReadsMapped < 70 | annoQC$libsize >3e7,],
+             aes(label=SampleID), size=3, vjust=0, hjust=.9, colour="black")
+
+
+# remove low quality libraries from anno and counts
+annoQC.NO <- annoQC %>% filter(pctUniquelyMappedReads > 75)
+#
+rawCountsQC <- rawCounts %>% select(one_of(c("MMG", annoQC.NO$SampleID)))
+
+
+```
+
+
+## Gene filtering  
+Here we remove genes that are expressed at very low levels or aren't expressed at all.  This reduces noise and multiple testing correction penalties and allows us to better see believable differences between groups. In this first pass, genes must have at least 1 log2 count per million (lcpm) in 10 percent of libraries.
+
+```{r Gene filtering}
+
+# very liberal low expression filter, just for preliminary PCA.
+
+cpm.rawCounts <- cpm(rawCountsQC[,-1])
+
+# low expression filter
+keepRows <- (rowSums((cpm.rawCounts) >= .1) >= (ncol(rawCountsQC)/10)) # & (apply(lcpm.rawCounts,1,mean) >= 1)
+ table(keepRows) 
+rawCountsQC <- rawCountsQC[keepRows,] 
+
+
+## Make a translator key from MMG to entrez IDs to HGNC symbols
+# make translation keys to switch from Entrez gene IDs to ensembl IDs to HGNC gene symbols when needed. we'll use ensembl IDs for most of the analyses, only translating to HGNC downstream when we need to make sense of the results.
+
+# MMG numbers are entrez gene IDs!  HUMAN gene IDs!!! Not Macaque.
+# Make a table to convert MMG# to HGNC
+MMGtoHGNC <- rawCounts[,"MMG", drop=FALSE]
+MMGtoHGNC$Entrez <- sapply(strsplit(MMGtoHGNC$MMG, split='G', fixed=TRUE), function(x) (x[2]))
+MMGtoHGNC <- arrange(MMGtoHGNC, Entrez)
+
+genes <- read.csv(paste0(whereIam, "PROJECTS/Genes/Human_GRCh38p7_EntrezID_cleaned.csv"))   # downloaded from biomart 2/16/17 and cleaned up.
+
+# some genes have two entrez IDs per HGNCsymbol, but everything else is the same- see how the counts compare below
+# sum(MMGtoHGNC$Entrez %in% as.character(genes$EntrezGeneID) )   # all genes from RNAseq experiment are present in biomart database
+# sum(!as.character(genes$EntrezGeneID) %in% MMGtoHGNC$Entrez )   #  9289 genes in database not present in RNAseq experiment, non-homologous or QC'd out?
+
+MMGtoHGNC <- merge(genes[,c("EntrezGeneID", "GeneID", "HGNCsymbol")], MMGtoHGNC, by.x="EntrezGeneID", by.y="Entrez")
+MMGtoHGNC <- as.data.frame(apply(MMGtoHGNC, 2, as.character))
+
+# sum(is.na(MMGtoHGNC$HGNCsymbol))
+# sum(MMGtoHGNC$HGNCsymbol=="")
+# 57 don't have HGNC symbols
+
+# # put in a modified entrez ID for any missing gene names
+# MMGtoHGNC$HGNCsymbol[MMGtoHGNC$HGNCsymbol==""] <- MMGtoHGNC[MMGtoHGNC$HGNCsymbol=="", "MMG"]
+
+
+
+# #### write a raw counts file for submission to GEO
+# 
+# submitCounts <- merge(MMGtoHGNC, rawCountsQC, by="MMG")
+# 
+# submitCounts <- submitCounts %>% select(-1) %>% rename(ensemblID = GeneID)
+# 
+# write.csv(submitCounts, "PAPER/FINAL/aligned_counts.csv", row.names = FALSE)
+
+
+# delete a bunch of stuff from environment
+rm( QC1, QC2, rawCountsPlusQC,  keepRows)
+
+```
+
+  
+## Initial look at samples with PCA  
+
+With a principle component analysis, we see the samples cluster by tissue types; most of the variation lies between muscle and adipose tissue.
+
+We'll also normalize the counts with the TMM method before analysis.  The PCA run on normalized counts is very similar to that run on raw counts (not shown.)  
+
+
+```{r PCA pre-normalization, fig.height=3.5, fig.width=5}
+
+#### PCA (use wide format data: rows = samples, columns = measurements)---
+# make sure samples are in same order in counts and annotation
+
+if(!all(colnames(rawCountsQC)[-1] == annoQC.NO$SampleID)){
+  print("CAUTION: Sample order does not match!!") 
+}
+
+# transform into logCPM counts first
+lcpm.Counts.Raw <- cpm(rawCountsQC[,-1], log=TRUE)
+
+# Run PCA!  (from Functions_general, this function centers but does not scale data)
+init.PCA.Raw <- runPCA(lcpm.Counts.Raw, annoQC.NO)
+
+# Make PCA plots from first 3 PCs
+
+ggplot(init.PCA.Raw$pdatScores, aes(x=PC1, y=PC2, color=Treatment, shape=Tissue)) + 
+  geom_point(size=5, alpha=.8) +
+  labs(x = init.PCA.Raw$PCi$PC1, y = init.PCA.Raw$PCi$PC2)+
+  ggtitle("PCA using all genes, raw data")+
+  geom_text(data=init.PCA.Raw$pdatScores[init.PCA.Raw$pdatScores$PC2 < -200,],
+            aes(label=SampleID), size=4, vjust=-1, hjust=0.9, colour="black")
+
+
+```
+
+
+
+
+
+```{r TMM norm tissues separately}
+# run TMM separately on muscle and adipose tissue
+# apply more strict filter to each tissue separately before normalizing.
+
+# adipose
+annoAT <- annoQC.NO %>% filter(Tissue=="Adipose")
+rawCountsQC.AT <- rawCountsQC[,match(annoAT$SampleID, colnames(rawCountsQC))]
+
+cpm.rawCounts.AT <- cpm(rawCountsQC.AT[,-1])
+
+# low expression filter
+keepRows <- (rowSums((cpm.rawCounts.AT) >= .5) >= (ncol(rawCountsQC.AT)/10))  
+ table(keepRows) 
+rawCountsQC.AT <- rawCountsQC.AT[keepRows,] 
+
+DGE.AT <- DGEList(counts=rawCountsQC.AT)
+DGE.AT <- calcNormFactors(DGE.AT)
+
+# make a normalized counts matrix for use outside of limma (PCA, etc)
+normFactors.AT <- DGE.AT$samples[,"norm.factors"]
+normCounts.AT <- as.data.frame(t(t(DGE.AT$counts)/normFactors.AT))
+lcpm.normCounts.AT <- cpm(normCounts.AT, log=TRUE)
+
+
+
+# Muscle
+annoG <- annoQC.NO %>% filter(Tissue=="Gastrocnemius")
+rawCountsQC.G <- rawCountsQC[,match(annoG$SampleID, colnames(rawCountsQC))]
+
+cpm.rawCounts.G <- cpm(rawCountsQC.G[,-1])
+
+# low expression filter
+keepRows <- (rowSums((cpm.rawCounts.G) >= .5) >= (ncol(rawCountsQC.G)/10)) 
+ table(keepRows) 
+rawCountsQC.G <- rawCountsQC.G[keepRows,] 
+
+DGE.G <- DGEList(counts=rawCountsQC.G)
+DGE.G <- calcNormFactors(DGE.G)
+
+# make a normalized counts matrix for use outside of limma (PCA, etc)
+normFactors.G <- DGE.G$samples[,"norm.factors"]
+normCounts.G <- as.data.frame(t(t(DGE.G$counts)/normFactors.G))
+lcpm.normCounts.G <- cpm(normCounts.G, log=TRUE)
+
+```
+
+&nbsp;  
+
+Let's zoom in on each of the different tissues separately.
+  
+
+
+
+### PCA: FGF21-treated Adipose Tissue
+
+```{r AT PCA, fig.width=8, fig.height=3.5}
+
+lcpm.normCounts.AT <- lcpm.normCounts.AT[, match(annoAT$SampleID, colnames(lcpm.normCounts.AT))]
+
+AT.PCA <- runPCA(lcpm.normCounts.AT, annoAT)
+
+AT.PCA$pdatScores$Treatment <- factor(AT.PCA$pdatScores$Treatment, levels = c("FGF21.Pre",  "FGF21.Post", "FGF21.Wash"))
+
+P1<- ggplot(AT.PCA$pdatScores, aes(x=PC1, y=PC2, color=Treatment, shape=Treatment)) + 
+  geom_point(size=5, alpha=.8) +
+  scale_color_manual(values =c("orangered", "deepskyblue4", "olivedrab"), labels = c("Pre", "Post", "Wash") )+
+  scale_shape_manual(values = c(16,17,15))+
+  labs(x = AT.PCA$PCi$PC1, y = AT.PCA$PCi$PC2)+
+  ggtitle("Adipose tissue")
+
+P2<- ggplot(AT.PCA$pdatScores, aes(x=PC2, y=PC3, color=Treatment, shape=Treatment)) + 
+  geom_point(size=3, alpha=.8) +
+  scale_color_manual(values =c("orangered", "deepskyblue4", "olivedrab"), labels = c("Pre", "Post", "Wash") )+
+  scale_shape_manual(values = c(16,17,15))+
+  labs(x = AT.PCA$PCi$PC2, y = AT.PCA$PCi$PC3)+
+  ggtitle("Adipose tissue")
+  #theme(legend.position=c(.1,.9))
+
+grid.arrange(P1, P2, ncol=2)
+
+
+# Check whether sex or starting weight correlates with first few PCs
+
+P3<- ggplot(AT.PCA$pdatScores, aes(x=PC1, y=PC2, color=Sex, shape = Treatment)) + 
+  geom_point(size=5, alpha=.7) +
+  labs(x = AT.PCA$PCi$PC1, y = AT.PCA$PCi$PC2)+
+  ggtitle("Adipose tissue")
+
+P4<- ggplot(AT.PCA$pdatScores, aes(x=PC1, y=PC2, color=startWeight, shape = Treatment )) + 
+  geom_point(size=5, alpha=.7) +
+  labs(x = AT.PCA$PCi$PC1, y = AT.PCA$PCi$PC2)+
+  ggtitle("Adipose tissue")
+  #theme(legend.position=c(.1,.9))
+
+grid.arrange(P3, P4, ncol=2)
+
+###############################
+# Resubmit
+# Might be good to show this plot to reviewers.
+# by animal ID -> animals generally show same pattern from pre to post to wash!
+ggplot(AT.PCA$pdatScores, aes(x=PC1, y=PC2, color=as.factor(AnimalID), shape = Treatment)) + 
+  geom_point(size=5, alpha=.7) +
+  labs(x = AT.PCA$PCi$PC1, y = AT.PCA$PCi$PC2)+
+  ggtitle("Adipose tissue")
+##############################
+
+
+
+# # show progression from pre to post to wash by connecting samples with lines??  Lines dont follow timepoints...
+# AT.PCA$pdatScores$Treatment <- factor(AT.PCA$pdatScores$Treatment, levels= c("FGF21.Pre", "FGF21.Post", "FGF21.Wash"))
+# ggplot(AT.PCA$pdatScores, aes(x=PC1, y=PC2, color=Sex, shape = Treatment, group = AnimalID)) + 
+#   geom_point(size=5, alpha=.7) +
+#   geom_line()+
+#   labs(x = AT.PCA$PCi$PC1, y = AT.PCA$PCi$PC2)+
+#   ggtitle("Adipose tissue")
+
+
+##  Narrow down to post treatment samples - is PCA affected by sex or start weight?
+ATpost <- annoAT %>% filter(Treatment == "FGF21.Post")
+ATpost.PCA <- runPCA.4(lcpm.normCounts.AT[,colnames(lcpm.normCounts.AT) %in% ATpost$SampleID], ATpost)
+
+P5<- ggplot(ATpost.PCA$pdatScores, aes(x=PC1, y=PC2, color=Sex, shape = Treatment)) + 
+  geom_point(size=5, alpha=.7) +
+  labs(x = ATpost.PCA$PCi$PC1, y = ATpost.PCA$PCi$PC2)+
+  ggtitle("Adipose tissue")
+
+P6<- ggplot(ATpost.PCA$pdatScores, aes(x=PC1, y=PC2, color=startWeight, shape = Treatment )) + 
+  geom_point(size=5, alpha=.7) +
+  labs(x = ATpost.PCA$PCi$PC1, y = ATpost.PCA$PCi$PC2)+
+  ggtitle("Adipose tissue")
+  #theme(legend.position=c(.1,.9))
+
+grid.arrange(P5, P6, ncol=2)
+
+
+# Sex and start weight vs PC1
+
+ggplot(ATpost.PCA$pdatScores, aes(x= Sex, y= PC1))+
+  geom_boxplot(outlier.color = NA)+
+  geom_point()
+
+
+###################################
+# Resubmit
+#### This might be good to send to reviewers ###
+ggplot(ATpost.PCA$pdatScores, aes(x= startWeight, y= PC1, color = Sex))+
+  geom_point(size = 5)
+
+ggplot(AT.PCA$pdatScores, aes(x= startWeight, y= PC1, color = Treatment, shape=Sex))+
+  geom_point(size = 5)
+
+ggplot(AT.PCA$pdatScores, aes(x= startWeight, y= PC1, color = Treatment, shape=Sex, group=AnimalID))+
+  geom_line(color = "grey")+
+  geom_point(size = 5)+
+  scale_color_manual(values = c("orangered", "deepskyblue4", "olivedrab"))
+  
+##################################
+
+
+# Since animalID is included in the model, Sex and startWeight are technically included in the model too!!
+# What we really need to show is whether degree of weightloss is correlated with sex or starting weight... !!!
+# If it is, we have a confounding factor in interpreting association between degree of weight loss and changes in gene expression.
+
+```
+
+
+
+
+### PCA: FGF21-treated Gastrocnemius Muscle  
+
+*Here we want to support our decision to exclude gastroc from the DE analysis, so show huge variation in response on PCA plot*
+
+```{r PCA gastroc}
+
+lcpm.normCounts.G <- lcpm.normCounts.G[, match(annoG$SampleID, colnames(lcpm.normCounts.G))]
+
+
+G.PCA <- runPCA(lcpm.normCounts.G, annoG)
+
+P1<- ggplot(G.PCA$pdatScores, aes(x=PC1, y=PC2, color=Treatment)) + 
+  geom_point(size=3, alpha=.8) +
+  labs(x = G.PCA$PCi$PC1, y = G.PCA$PCi$PC2)+
+  ggtitle("Gastroc Tissue")
+  #theme(legend.position=c(.9,.1))
+
+P2<- ggplot(G.PCA$pdatScores, aes(x=PC2, y=PC3, color=Treatment)) + 
+  geom_point(size=3, alpha=.8) +
+  labs(x = G.PCA$PCi$PC2, y = G.PCA$PCi$PC3)+
+  ggtitle("Gastroc Tissue")
+
+grid.arrange(P1, P2, ncol=2)
+
+
+## Post treatment samples separate on PC1; half the monkeys seem to respond to treatment (from pre to post) in the opposite direction along PC1!!
+
+P3<- ggplot(G.PCA$pdatScores, aes(x=PC1, y=PC2, shape=Treatment, color = Sex)) + 
+  geom_point(size=3, alpha=.8) +
+  labs(x = G.PCA$PCi$PC1, y = G.PCA$PCi$PC2)+
+  ggtitle("Gastroc Tissue")
+  #theme(legend.position=c(.9,.1))
+
+P4<- ggplot(G.PCA$pdatScores, aes(x=PC1, y=PC2, shape=Treatment, color = startWeight)) + 
+  geom_point(size=3, alpha=.8) +
+  labs(x = G.PCA$PCi$PC1, y = G.PCA$PCi$PC2)+
+  ggtitle("Gastroc Tissue")
+
+grid.arrange(P3, P4, ncol=2)
+
+# The only pattern related to Sex or startWeight seems to be that males respond to treatment by moving farther out along PC1, but still in opposite directions (two move right, two move left from pre to post).
+
+
+# Check sequencing batch
+
+ggplot(G.PCA$pdatScores, aes(x=PC1, y=PC2, shape=Treatment, color = seqBatch)) + 
+  geom_point(size=5, alpha=.8) +
+  labs(x = G.PCA$PCi$PC1, y = G.PCA$PCi$PC2)+
+  ggtitle("Gastroc Tissue")
+
+
+ggplot(G.PCA$pdatScores, aes(x=seqBatch, y = PC1))+
+  geom_boxplot(outlier.colour = NA)+
+  geom_point(aes(color = Treatment))
+
+
+# Here we might want to see what batch correcting for sequencing batch does to help the highly variable response to treatment...
+# However, the treatment groups aren't super well balanced between batches, so this may end up erasing biological variation as well as technical variation.
+
+```
+  
+ 
+
+# Differential gene expression analysis
+
+We'll start by using the limma package to look for DE genes between Pre, Post, and Washout time points in the FGF21-treated animals, then we'll investigate which of those DE genes are also induced during caloric restriction.  Our model to test for differential expression between Treatments will include individual, which makes it a paired analysis.  
+
+ 
+
+## Adipose  
+
+We've investigated whether the variation between samples is driven by any RNAseq library quality metrics (Supp Info 1) and have found that in the adipose samples, PC2 (12.3% of variation) correlates with the number of uniquely mapped reads (library size), r=-.72, and the number of reads that mapped to multiple loci, r=-.48.  Including one or both of these QC metrics in our model may help us detect DE genes. 
+
+Five monkeys yielded high-quality samples from all three Treatment time points, and an additional five monkeys yielded samples from one or two time points.  Thus we have 7 monkeys for the post vs pre comparison, 6 for wash vs pre, and 6 for wash vs post.
+
+
+
+
+```{r FINAL AT DEG with Animal in model, fig.height=8}
+
+# Set design and counts matrix
+Design <- annoAT
+DGE <- DGE.AT
+DGE <- DGE[,match(Design$SampleID, colnames(DGE$counts))]
+
+# how many samples in each group?
+# table(Design$Treatment, Design$AnimalID)
+
+# already filtered for low expression before TMM normalization
+
+### Individual included in model
+  # make design matrix 
+  Treat <- factor(Design$Treatment)
+  Treat <- relevel(Treat, ref="FGF21.Pre")  # sets Pre as baseline
+  Indiv <- factor(Design$AnimalID)
+  DesMat <- model.matrix(~0+Indiv+Treat)
+  #DGE.voom2 <- voom(DGE, design= DesMat, plot = TRUE)
+  DGE.voom <- voomWithQualityWeights(DGE, design= DesMat, plot = FALSE)
+  # extract voomed counts values (normalized on log2 scale)
+  voomCounts.AT <- DGE.voom$E  # same as voom normalized w/o animal in model
+  #plotMDS(DGE.voom, labels=Design$treat)
+
+  # make a linear fit model, this time just with individual.  Maybe run a model including most-highly correlated QC metric later.
+  fit <- lmFit(DGE.voom, DesMat)
+
+  # Here, no contrast matrix needed, because FGF21Post column = PostvsPre and FGF21Wash = WashvsPre
+      # because we set Pre as reference above.  
+  fit2 <- eBayes(fit)  #tests whether each gene is sig across all groups
+  # plotSA(fit2)
+  # summary(decideTests(fit2))   # Number of significant genes in each contrast
+
+## get DE genes for PostvsPre and WashvsPre
+      # should adjust for multiple comparisons across two contrasts, so FDR < .01 or so
+  # then write a file of p values for each comparison.
+AT.PostVsPre.I <- topTable(fit2, coef=11, number=Inf, adjust.method="BH")  # log2 fold change of at least 10%
+AT.PostVsPre.I <- merge(MMGtoHGNC, AT.PostVsPre.I, by.x="MMG", by.y="row.names")
+AT.PostVsPre.I <- arrange(AT.PostVsPre.I, adj.P.Val, P.Value)
+AT.PostVsPre.I$Sig <- ifelse(AT.PostVsPre.I$adj.P.Val<.05 & abs(AT.PostVsPre.I$logFC) > .26, "significant", "ns" )
+AT.PostVsPre.I$Sig <- ifelse(AT.PostVsPre.I$adj.P.Val<.05 & abs(AT.PostVsPre.I$logFC) > .26, "significant", "ns" )
+
+# table(AT.PostVsPre.I$Sig)
+
+top10 <- AT.PostVsPre.I %>% filter(abs(logFC) > .33 & adj.P.Val < .1 ) %>%
+  arrange(P.Value) %>%
+  dplyr::slice(1:10) %>% dplyr::select(MMG)
+plotTop10.paired(top10, counts=voomCounts.AT, by="Treatment", anno=annoAT, title="Top 10 DE genes in Adipose Tissue, Post vs Pre")
+
+ # filename <- "Results/FINAL/AT.PostVPre.IndivModel.csv"
+ # write.csv(AT.PostVsPre.I, filename, quote = F, row.names = F)
+
+# #volcano plot
+# ggplot(AT.PostVsPre.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+#   geom_point(alpha=.6)+
+#   scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+#   xlab("log2 fold change in expression")+
+#   ylab("-log10 adjusted p value")+
+#   ggtitle("DEG in post- vs pre-treatment adipose tissue")
+#   
+# 
+# print("DE genes in Post-FGF21 vs Pre-FGF21 Adipose tissue samples")
+# AT.PostVsPre.I %>% filter(abs(logFC) > .33 & AveExpr > 0 ) %>%
+#   arrange(P.Value) %>% dplyr::select(c(3:6,8,9)) %>%
+#   head(10)
+
+
+
+# Wash vs Pre
+AT.WashVsPre.I <- topTable(fit2, coef=12, number=Inf, adjust.method="BH" )  # log2 fold change of at least 10%
+AT.WashVsPre.I <- merge(MMGtoHGNC, AT.WashVsPre.I, by.x="MMG", by.y="row.names")
+AT.WashVsPre.I <- arrange(AT.WashVsPre.I, adj.P.Val, P.Value)
+AT.WashVsPre.I$Sig <- ifelse(AT.WashVsPre.I$adj.P.Val<.05 & abs(AT.WashVsPre.I$logFC) > .26, "significant", "ns" )
+
+# AT.WashVsPre.I %>% filter(adj.P.Val<.05 & AT.WashVsPre.I$logFC < -.26) %>% nrow()
+
+top10 <- AT.WashVsPre.I %>% filter(abs(logFC) > .33 & adj.P.Val < .1 ) %>%
+  arrange(P.Value) %>%
+  dplyr::slice(1:10) %>% dplyr::select(MMG)
+plotTop10.paired(top10, voomCounts.AT, by="Treatment", annoAT, "Top 10 DE genes in Adipose Tissue, Wash vs Pre")
+
+# filename <- "Results/FINAL/AT.WashVsPre.IndivModel.csv"
+# write.csv(AT.WashVsPre.I, filename, quote = F, row.names = F)
+
+# #volcano plot
+# ggplot(AT.WashVsPre.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+#   geom_point(alpha=.6)+
+#   scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+#   xlab("log2 fold change in expression")+
+#   ylab("-log10 adjusted p value")+
+#   ggtitle("DEG in washout- vs pre-treatment adipose tissue")
+# 
+# print("DE genes in FGF21-Wash out vs Pre-FGF21 Adipose tissue samples")
+# AT.WashVsPre.I %>% filter(abs(logFC) > .33 & adj.P.Val < .1 ) %>%
+#   arrange(P.Value) %>% dplyr::select(c(3:6,8,9)) %>%
+#   head(10)
+
+
+
+
+# Wash vs post
+ # For this comparison, we need to make contrast matrix.  
+    # Comparing the Wash and Post groups with Pre in the model will account for baseline levels at Pre timepoint.
+  contrastMatrix <- makeContrasts(TreatFGF21.Wash-TreatFGF21.Post,  levels=DesMat)
+  fit3 <- contrasts.fit(fit, contrastMatrix)
+  fit3 <- eBayes(fit3)  #tests whether each gene is sig across all groups
+  #plotSA(fit3)
+  # summary(decideTests(fit3)) 
+
+AT.WashVsPost.I <- topTable(fit3, coef=1, number=Inf, adjust.method="BH" )  # log2 fold change of at least 10%
+AT.WashVsPost.I <- merge(MMGtoHGNC, AT.WashVsPost.I, by.x="MMG", by.y="row.names")
+AT.WashVsPost.I <- arrange(AT.WashVsPost.I, adj.P.Val, P.Value)
+AT.WashVsPost.I$Sig <- ifelse(AT.WashVsPost.I$adj.P.Val<.05 & abs(AT.WashVsPost.I$logFC) > .26, "significant", "ns" )
+
+# AT.WashVsPost.I %>% filter(adj.P.Val<.05 & AT.WashVsPost.I$logFC < -.26) %>% nrow()
+
+
+top10 <- AT.WashVsPost.I %>% filter(abs(logFC) > .33 & adj.P.Val < .1 ) %>%
+  arrange(P.Value) %>%
+  dplyr::slice(1:10) %>% dplyr::select(MMG)
+plotTop10.paired(top10, voomCounts.AT, by="Treatment", annoAT, "Top 10 DE genes in Adipose Tissue, Wash vs Post")
+
+# filename <- "Results/FINAL/AT.WashVsPost.IndivModel.PreBase.csv"
+# write.csv(AT.WashVsPost.I, filename, quote = F, row.names = F)
+
+# #volcano plot
+# ggplot(AT.WashVsPost.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+#   geom_point(alpha=.6)+
+#   scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+#   xlab("log2 fold change in expression")+
+#   ylab("-log10 adjusted p value")+
+#   ggtitle("DEG in washout vs post-treatment adipose tissue")
+# 
+# 
+# print("DE genes in FGF21-Wash out vs Post-FGF21 Adipose tissue samples")
+# 
+# AT.WashVsPost.I %>% filter(abs(logFC) > .33 & adj.P.Val < .1 ) %>%
+#   arrange(P.Value) %>% dplyr::select(c(3:6,8,9)) %>%
+#   head(10)
+
+
+
+
+```
+
+
+
+
+##Gastrocnemius muscle  
+
+In the gastroc samples, there were no notable correlations between any of the first PCs and library quality metrics (Supp Info 1).  We might want to include RNAseq batch, because about half of the gastroc samples were resequenced.  However, the treatment groups aren't super well balanced between batches, so this may end up erasing biological variation as well as technical variation.
+
+We have all three time points from 6 monkeys, and an additional monkey with two time points, giving us n=6 for Post vs Pre, n=6 for Wash vs Pre, and n=8 for Wash vs Post.  
+
+
+
+
+```{r FINAL Gastroc animal in Model}
+
+# Set design and counts matrix
+Design <- annoG
+# can choose all genes or subset of genes here
+DGE <- DGE.G  #[rownames(DGE.all) %in% ECPs$MMG,]
+DGE <- DGE[,match(Design$SampleID, colnames(DGE$counts))]
+
+
+# low-expression filter for this particular sample set
+# already filtered before TMM normalization
+
+
+### Individual in model
+  # make design matrix
+  Treat <- factor(Design$Treatment)
+  Treat <- relevel(Treat, ref="FGF21.Pre")
+  Indiv <- factor(Design$AnimalID)
+  DesMat <- model.matrix(~0+Indiv+Treat)
+  #DGE.voom <- voom(DGE, design= DesMat, plot = TRUE)
+  DGE.voom <- voomWithQualityWeights(DGE, design= DesMat, plot = FALSE)
+  # extract voomed counts values (normalized on log2 scale)
+  voomCounts.G <- DGE.voom$E   # same as voom normalized w/o animal in model
+  #plotMDS(DGE.voom, labels=Design$Treat)
+
+  # make a linear fit model, this time just with individual.  Maybe run a model including most-highly correlated QC metric later.
+  fit <- lmFit(DGE.voom, DesMat)
+  fit2 <- eBayes(fit)  #tests whether each gene is sig across all groups
+  # plotSA(fit2)
+  # summary(decideTests(fit2))  
+
+  ## Extract PostvsPre and WashvsPre.  WashvsPost with Pre as baseline is below.
+Gas.PostVsPre.I <- topTable(fit2, coef=9, number=Inf, adjust.method="BH")  # log2 fold change of at least 10%
+Gas.PostVsPre.I <- merge(MMGtoHGNC, Gas.PostVsPre.I, by.x="MMG", by.y="row.names")
+Gas.PostVsPre.I <- arrange(Gas.PostVsPre.I, adj.P.Val, P.Value)
+Gas.PostVsPre.I$Sig <- ifelse(Gas.PostVsPre.I$adj.P.Val<.05 & abs(Gas.PostVsPre.I$logFC) > .26, "significant", "ns" )
+Gas.PostVsPre.I$unadjSig <- ifelse(Gas.PostVsPre.I$P.Value<.05 & abs(Gas.PostVsPre.I$logFC) > .26, "significant", "ns" )
+
+# Gas.PostVsPre.I %>% filter(adj.P.Val<.05 & Gas.PostVsPre.I$logFC < -.26) %>% nrow()
+
+
+#volcano plot
+ggplot(Gas.PostVsPre.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+  geom_point(alpha=.6)+
+  #ylim(0,4)+
+  scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+  xlab("log2 fold change in expression")+
+  ylab("-log10 adjusted p value")+
+  ggtitle("DEG in post- vs pre-treatment gastrocnemius tissue")
+
+#volcano plot with unadjusted p vals
+ggplot(Gas.PostVsPre.I, aes(x=logFC, y=-log10(P.Value), color=Sig))+
+  geom_point(alpha=.6)+
+  #ylim(0,4)+
+  scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+  xlab("log2 fold change in expression")+
+  ylab("-log10 adjusted p value")+
+  ggtitle("DEG in post- vs pre-treatment gastrocnemius tissue")
+
+
+print("DE genes in Post-FGF21 vs Pre-FGF21 Gastroc muscle tissue samples")
+Gas.PostVsPre.I  %>% filter(abs(logFC) > .25, AveExpr >0) %>%
+  arrange(P.Value) %>% dplyr::select(c(3:6,8,9)) %>%
+  head(10)
+
+# check top 10 genes by eye
+# Post vs Pre
+top10 <- Gas.PostVsPre.I %>% filter(abs(logFC) > .33) %>%
+  arrange(P.Value) %>%
+  dplyr::slice(1:12) %>% dplyr::select(MMG)
+plotTop10.paired(top10, voomCounts.G, by="Treatment", annoG, "Top 10 DE genes in Gastroc Tissue, Post vs Pre (all ns)")
+
+# filename <- "Results/FINAL/Gas.PostVPre.IndivModel.csv"
+# write.csv(Gas.PostVsPre.I, filename, quote = F, row.names = F)
+
+
+# check for differences based on sex
+counts=voomCounts.G
+top10counts <- counts[rownames(counts) %in% top10$MMG,]
+  top10counts <- merge(MMGtoHGNC, top10counts, by.x="MMG", by.y="row.names")
+  sampleID <- colnames(top10counts)[-c(1:4)]
+  top10counts <- transpose(top10counts)
+  colnames(top10counts) <- top10counts[4,]
+  top10counts <- top10counts[-c(1:4),]
+  top10counts$SampleID <- sampleID
+  top10counts <- merge(top10counts, anno, by="SampleID")
+  L.top10 <- gather(top10counts, "Gene", "Counts", 2:(nrow(top10)+1))
+  L.top10$Counts <- as.numeric(L.top10$Counts)
+  L.top10$Treatment <- factor(L.top10$Treatment, levels =c("FGF21.Pre", "FGF21.Post", "FGF21.Wash"))
+  L.top10$Gene <- factor(L.top10$Gene, levels=c(unique(L.top10$Gene)))
+  
+  ggplot(L.top10, aes(x=Sex, y=Counts))+
+    # geom_line(aes(group=AnimalID), color="grey30")+
+    geom_boxplot(outlier.color=NA, aes(color=Treatment))+
+    # geom_point(size=3, shape=21, aes(fill=Sex))+
+    # stat_summary(fun.y="mean", geom="point", shape=23, size=2, fill="white")+
+    facet_wrap(~Gene, ncol=3, scales="free_y")+
+    ylab("log2 counts per million")+
+    # ggtitle(title)+
+    theme(legend.position = "none", axis.text.x = element_text(angle=20, hjust=1, vjust=1))
+
+
+  
+  
+# Wash vs Pre  
+
+Gas.WashVsPre.I <- topTable(fit2, coef=10, number=Inf, adjust.method="BH" )  # log2 fold change of at least 10%
+Gas.WashVsPre.I <- merge(MMGtoHGNC, Gas.WashVsPre.I, by.x="MMG", by.y="row.names")
+Gas.WashVsPre.I <- arrange(Gas.WashVsPre.I, adj.P.Val, P.Value)
+Gas.WashVsPre.I$Sig <- ifelse(Gas.WashVsPre.I$adj.P.Val<.05 & abs(Gas.WashVsPre.I$logFC) > .26, "significant", "ns" )
+Gas.WashVsPre.I$unadjSig <- ifelse(Gas.PostVsPre.I$P.Value<.05 & abs(Gas.WashVsPre.I$logFC) > .26, "significant", "ns" )
+
+# Gas.WashVsPre.I %>% filter(adj.P.Val<.05 & Gas.WashVsPre.I$logFC > .26) %>% nrow()
+
+
+print("DE genes in FGF21-Wash out vs Pre-FGF21 Gastroc muscle samples")
+Gas.WashVsPre.I %>% filter(abs(logFC) > .33 & adj.P.Val < .1 ) %>%
+  arrange(P.Value) %>% dplyr::select(c(3:6,8,9)) %>%
+  head(10)
+
+# Wash vs Pre
+top10 <- Gas.WashVsPre.I %>% filter(abs(logFC) > .33) %>%
+  arrange(P.Value) %>%
+  dplyr::slice(1:12) %>% dplyr::select(MMG)
+plotTop10.paired(top10, voomCounts.G, by="Treatment", annoG, "Top 10 DE genes in Gastroc Tissue, Wash vs Pre")
+
+# filename <- "Results/FINAL/Gas.WashVsPre.IndivMod.csv"
+# write.csv(Gas.WashVsPre.I, filename, quote = F, row.names = F)
+
+
+# wash vs post
+# make contrast matrix to make appropriate pair-wise comparisons
+  contrastMatrix <- makeContrasts( TreatFGF21.Wash-TreatFGF21.Post,  levels=DesMat)
+  fit3 <- contrasts.fit(fit, contrastMatrix)
+  fit3 <- eBayes(fit3)  #tests whether each gene is sig across all groups
+  # plotSA(fit3)
+  # summary(decideTests(fit3))
+
+
+Gas.WashVsPost.I <- topTable(fit3, coef=1, number=Inf, adjust.method="BH" )  # log2 fold change of at least 10%
+Gas.WashVsPost.I <- merge(MMGtoHGNC, Gas.WashVsPost.I, by.x="MMG", by.y="row.names")
+Gas.WashVsPost.I <- arrange(Gas.WashVsPost.I, adj.P.Val, P.Value)
+Gas.WashVsPost.I$Sig <- ifelse(Gas.WashVsPost.I$adj.P.Val<.05 & abs(Gas.WashVsPost.I$logFC) > .26, "significant", "ns" )
+Gas.WashVsPost.I$unadjSig <- ifelse(Gas.PostVsPre.I$P.Value<.05 & abs(Gas.WashVsPost.I$logFC) > .26, "significant", "ns" )
+
+# Gas.WashVsPost.I %>% filter(adj.P.Val<.05 & Gas.WashVsPost.I$logFC < -.26) %>% nrow()
+
+print("DE genes in FGF21-Wash out vs Post-FGF21 Gastroc muscle samples")
+Gas.WashVsPost.I %>% filter(abs(logFC) > .33 & adj.P.Val < .1 ) %>%
+  arrange(P.Value) %>% dplyr::select(c(3:6,8,9)) %>%
+  head(10)
+
+
+# Wash vs Post
+top10 <- Gas.WashVsPost.I %>% filter(abs(logFC) > .33) %>%
+  arrange(P.Value) %>%
+  dplyr::slice(1:10) %>% dplyr::select(MMG)
+plotTop10.paired(top10, voomCounts.G, by="Treatment", annoG, "Top 10 DE genes in Gastroc Tissue, Wash vs Post")
+
+
+# filename <- "Results/FINAL/Gas.WashVsPost.IndivModel.PreBase.csv"
+# write.csv(Gas.WashVsPost.I, filename, quote = F, row.names = F)
+
+```
+
+# > Package data tables for use in figures 
+
+```{r}
+
+
+# # # make a list of objects to save as RData
+# save(list=c("annoAT", "annoG",   "MMGtoHGNC", "rawCountsQC", "lcpm.normCounts.AT", "lcpm.normCounts.G", "voomCounts.AT", "voomCounts.G"), file="Data/QCd_and_modeled_data_1472.RData")
+
+
+
+
+```
+
+
+
+# Gene set / pathway analysis I
+
+
+
+```{r read in gene sets}
+
+
+OBtrim.GS <- readRDS(paste0(whereIam,"/PROJECTS/Genes/Broad/ObesityTrimmed.GS.rds"))
+
+GObioProc <- readRDS(paste0(whereIam, "PROJECTS/Genes/Broad/GO_bioProcessGS_human.rds"))
+
+Canon <- readRDS(paste0(whereIam, "PROJECTS/Genes/Broad/CanonGS_human.rds"))
+
+
+
+
+
+# make a combo of Canon and obesity gene sets
+OBcan.GS <- c(OBtrim.GS, Canon)
+OBcan.GS <- OBcan.GS[!grepl("HALLMARK", names(OBcan.GS))]
+OBcan.GS <- OBcan.GS[!grepl("combo", names(OBcan.GS))]
+OBcan.GS <- OBcan.GS[!grepl("IPA.NE", names(OBcan.GS))]
+OBcan.GS <- OBcan.GS[!duplicated(names(OBcan.GS))]
+
+
+```
+
+
+```{r filter gene sets by expression for DEG pathway enrichment}
+### filter gene sets by median expression
+# (lowly expressed sets can yield weird results)
+# it might make more sense to do this separately for each analysis, 
+# as the genes could vary based on the libraries included in the analysis
+
+# first put ensembl IDs onto counts matrix
+counts.A = lcpm.normCounts.AT
+counts.A <- merge(MMGtoHGNC, counts.A, by.x="MMG", by.y="row.names")
+# ditch all but ensg id
+counts.A <- counts.A[, -c(1:2,4)]
+
+
+OBtrimGS.expr <- filterGeneSets.ensg(counts.A, OBtrim.GS, 10)$geneSets.filtered
+GObioProc.expr <- filterGeneSets.ensg(counts.A, GObioProc, 10)$geneSets.filtered
+OBcan.expr <- filterGeneSets.ensg(counts.A, OBcan.GS, 10)$geneSets.filtered
+
+```
+
+## Post Vs Pre DEG    
+
+
+```{r Gene set enrichment by hypergeometric test}
+
+# grab top DE genes from pre vs post
+AT.PostVsPre.I <- read.csv("Results/FINAL/AT.PostVPre.IndivModel.csv")
+
+# up and down regulated genes
+rankedList <- AT.PostVsPre.I %>% 
+                    filter(abs(logFC)>.25)   # cut down to genes used to filter gene set list
+
+rankedList <- rankedList %>% arrange(adj.P.Val, P.Value)
+rankedList %>% filter(adj.P.Val <.25) %>% nrow()
+rankedList %>% filter(adj.P.Val <.05) %>% nrow()
+# use top 500 and 1000 for round numbers and top 3494 b/c p < .25
+
+
+
+###  FOR PAPER
+AT.PostVsPre.GO.GSE <- GSenrich.TopDEG(rankedList, fullGeneList = AT.PostVsPre.I$GeneID,  geneSets = GObioProc.expr, setSizes = c(100,500, 1000, 2005), nTopGS=10)
+
+# write.csv(AT.PostVsPre.GO.GSE$topRanked, "Results/FINAL/AT.PostVsPre.GSE.GObioProc_topRanked.csv")
+
+
+AT.PostVsPre.OBcan.GSE <- GSenrich.TopDEG(rankedList, fullGeneList = AT.PostVsPre.I$GeneID,  geneSets = OBcan.expr, setSizes = c(100,500, 1000, 2005), nTopGS=10)
+
+# write.csv(AT.PostVsPre.OBcan.GSE$topRanked, "Results/FINAL/AT.PostVsPre.GSE.OBcan_topRanked.csv")
+
+```
+
+
+
+
+
+
+***
+
+# WGCNA analysis
+
+Here we'll use Weighted Gene Correlation Network Analysis to build our own gene sets (or "modules") from the data.  Because the sample size is small, we will trim down the list of genes we use from all possible genes to only genes found in obesity relevant pathways.  We can either build modules within all samples, or we can build modules separately in adipose and muscle tissue.  Then we'll compare the expression of these modules between groups/timepoints.
+
+## Construct modules  
+
+### Adipose
+```{r Make modules}
+
+##### WGCNA with all genes
+
+
+## trying with log2 transformed, TMM normed (separate tissues) counts, because that's what WGCNA creators like.
+
+log.normCounts.AT <- log2(normCounts.AT+1)
+
+if(!all(colnames(log.normCounts.AT) == annoAT$SampleID)){
+  print("CAUTION: Sample order does not match!!")
+}
+
+
+### ### ### ### ###
+#### designate counts to be used and name of files to be saved
+counts <- log.normCounts.AT
+#phenoData <- annoM[,-c(8:42)]
+phenoData <- annoAT[,-c(8:42)]
+fileName <- "AT.allgenes"
+####  ###  ###  ###
+
+
+
+# low-expression filter for this particular sample set - use higher filter than for DEG analysis
+keepRows <- rowSums((counts) <= 5) <= (ncol(counts)*.9)  # log2(16)=4
+print("Genes that pass expression filter 1:")
+table(keepRows) 
+counts<- counts[keepRows,]      
+
+
+
+library(WGCNA);
+# The following setting is important, do not omit.
+options(stringsAsFactors = FALSE)
+
+datExpr0 <- t(counts)
+
+# Quality control on genes- checks for too many missing values
+gsg = goodSamplesGenes(datExpr0, verbose = 3);
+gsg$allOK
+
+# If above is FALSE, then remove bad samples
+if (!gsg$allOK)
+{
+  # Optionally, print the gene and sample names that were removed:
+  if (sum(!gsg$goodGenes)>0)
+    printFlush(paste("Removing genes:", paste(names(datExpr0)[!gsg$goodGenes], collapse = ", ")));
+  if (sum(!gsg$goodSamples)>0)
+    printFlush(paste("Removing samples:", paste(rownames(datExpr0)[!gsg$goodSamples], collapse = ", ")));
+  # Remove the offending genes and samples from the data:
+  datExpr0 = datExpr0[gsg$goodSamples, gsg$goodGenes]
+}
+
+
+# Next cluster samples to see if there are any obvious outliers.
+sampleTree = hclust(dist(datExpr0), method = "average");
+# Plot the sample tree:
+#quartz()
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1,
+     cex.axis = 2, cex.main = 3)
+
+# Remove outlier by hand, or choose a branch cut height to remove any below that line.
+# Default was height of 15, but these libraries are much more diverse.  
+# Plot a line to show the cut
+abline(h = 160, col = "red");
+# Determine clusters produced by cutting at that height
+clust = cutreeStatic(sampleTree, cutHeight = 160, minSize = 10)
+table(clust)
+
+# # clust 1 contains the samples we want to keep.
+# keepSamples = (clust==1)
+# # Make dataframe for network analysis
+# datExpr = datExpr0[keepSamples, ]
+
+### if no outliers need to be removed:
+# datExpr <- datExpr0
+
+nGenes = ncol(datExpr)
+nSamples = nrow(datExpr)
+
+
+# Make data frame analogous to expression data that will hold the clinical traits.
+datTraits = phenoData[match(rownames(datExpr), phenoData$SampleID),]
+rownames(datTraits) <- datTraits$SampleID
+
+collectGarbage();
+
+
+### How do clinical traits relate to sample dendrogram? ###
+# # This is just a heat map of expression values for continuous variable clinical traits
+# # Re-cluster samples
+# sampleTree2 = hclust(dist(datExpr), method = "average")
+# 
+# ## Convert traits to a color representation:
+# 
+# # For NUMERIC scale traits:
+# #traitColors = numbers2colors(datTraits, signed = FALSE)  # white = low, red = high, grey = missing entry
+# 
+# # For CATEGORICAL traits:
+# labelcolors <- labels2colors(datTraits)
+# 
+# # Plot the clustered sample dendrogram with a heatmap of clinical traits underneath (not clustered).
+# plotDendroAndColors(sampleTree2, labelcolors,
+#                     groupLabels = names(datTraits),
+#                     main = "Sample dendrogram and trait heatmap")
+
+
+
+
+##### WGCNA Network analysis: custom step-by-step ###
+
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 2, to=30, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5, networkType="signed", blockSize=8000)
+# Plot the results:
+par(mfrow = c(1,2));
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+
+
+
+# We now calculate the adjacencies, using the soft thresholding power picked from above graph
+softPower = 14;  # for muscle - 14 (excluding 4 deep-sequenced soleus samples); AT - 16
+adjacency = adjacency(datExpr, type="signed", power = softPower);
+
+#To minimize effects of noise and spurious associations,
+# we transform the adjacency into Topological Overlap Matrix,
+# and calculate the corresponding dissimilarity:
+# (could put in your own correlation matrix instead of adjacency here)
+TOM = TOMsimilarity(adjacency);
+dissTOM = 1-TOM
+
+# Cluster the genes
+# Call the hierarchical clustering function
+geneTree = hclust(as.dist(dissTOM), method = "average");
+# Plot the resulting clustering tree (dendrogram)
+#quartz()
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+     labels = FALSE, hang = 0.04);
+
+# Now cut the tree to make modules
+# Normally we set min module at 25 genes for gene expression data:
+minModuleSize = 25;
+# Module identification using dynamic tree cut:
+# method is "hybrid" by default
+# deepsplit: 0 to 4, higher = more and smaller clusters
+# cutHeight: max joining heights that will be considered
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,
+                            deepSplit = 4, pamRespectsDendro = TRUE,
+                            minClusterSize = minModuleSize);
+# Look at modules made and their size:
+table(dynamicMods)
+length(unique(dynamicMods))
+
+# Convert numeric lables into colors
+dynamicColors = labels2colors(dynamicMods)
+table(dynamicColors)
+# Plot the dendrogram and colors underneath
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Gene dendrogram and module colors")
+
+## Merge modules whose expression is very similar
+## To quantify co-expression similarity of entire modules, we
+## calculate their eigengenes and cluster them on their correlation.
+
+# Calculate eigengenes
+MEList = moduleEigengenes(datExpr, colors = dynamicColors)
+MEs = MEList$eigengenes
+rownames(MEs) <- rownames(datExpr)
+
+#Examine module correlations
+# plotMEpairs(MEs)
+
+# pdf("Results/WGCNA/All Genes log2/MEpairs.test.pdf", height=10, width=10)
+# plotMEpairs(MEs)
+# dev.off()
+
+# Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs, use = "pairwise.complete.obs");
+# Cluster module eigengenes
+METree = hclust(as.dist(MEDiss), method = "average");
+# Plot the result
+plot(METree, main = "Clustering of module eigengenes",
+     xlab = "", sub = "")
+
+
+# We usually choose a height cut of 0.25, corresponding to correlation of 0.75,
+# to merge modules. (Shown as line on plot.)
+MEDissThres = 0.1  #.1 used for muscle (31 modules), .1 used for AT (88 modules)
+# Plot the cut line into the dendrogram
+abline(h=MEDissThres, col = "red")
+
+# Call an automatic merging function
+merge = mergeCloseModules(datExpr, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+# The merged module colors
+mergedColors = merge$colors;
+# Eigengenes of the new merged modules:
+mergedMEs = merge$newMEs;
+
+# Plot results of the merge:
+#quartz()
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors),
+                    c("Dynamic Tree Cut", "Merged dynamic"),
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+
+plotDendroAndColors(geneTree, mergedColors,
+                    c("Dynamic Tree Cut", "Merged dynamic"),
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+
+
+#Save for further analysis:
+# Rename to moduleColors
+moduleColors = mergedColors
+
+# Construct numerical labels corresponding to the colors
+colorOrder = c("grey", standardColors(50));
+moduleLabels = match(moduleColors, colorOrder)-1;
+MEs = mergedMEs
+rownames(MEs) <- rownames(datExpr)
+
+table(moduleColors)
+length(unique(moduleColors)) 
+# plotMEpairs(MEs)
+
+# plots are too small with a large number of modules
+pdfFileName <- paste0(paste0("Results/WGCNA/All Genes log2/", fileName), ".MEpairs.pdf")
+pdf(pdfFileName, height=9, width=9)
+plotMEpairs(MEs)
+dev.off()
+
+# write module eigengene expression table
+MEexpFileName <- paste0(paste0("Results/WGCNA/All Genes log2/", fileName), ".MEexp.csv")
+# write.csv(MEs, file = MEexpFileName)
+
+
+##### module membership ###
+MEs = orderMEs(MEs)
+rownames(MEs) <- rownames(datExpr)
+
+# names (colors) of the modules
+modNames = substring(names(MEs), 3)
+
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="")
+
+# Create data frame with gene info and module membership, etc
+# ** use dynamicColors if you haven't merged modules, moduleColors if you have
+geneInfo0 = data.frame(MMG = colnames(datExpr),moduleColor = moduleColors)
+geneInfo <- merge(geneInfo0, geneModuleMembership, by.y="row.names", by.x="MMG")
+
+# write module info and membership
+# first put on HGNC and entrez IDs
+geneInfo <- merge(MMGtoHGNC, geneInfo, by="MMG")
+#geneInfo <- merge(genes[,c("GeneID", "EntrezGeneID")], geneInfo, by="EntrezGeneID")
+# Order the genes in the geneInfo variable module color
+geneInfo = geneInfo[order(geneInfo$moduleColor), ]
+MMfileName <- paste0(paste0("Results/WGCNA/All Genes log2/", fileName), ".Mods.csv")
+# write.csv(geneInfo, file = MMfileName )
+
+```
+
+
+### Gastroc
+```{r Make modules}
+
+##### WGCNA with all genes
+
+library(WGCNA);
+# The following setting is important, do not omit.
+options(stringsAsFactors = FALSE)
+
+
+## trying with log2 transformed, TMM normed (separate tissues) counts, because that's what WGCNA creators like.
+
+log.normCounts.G <- log2(normCounts.G+1)
+
+if(!all(colnames(log.normCounts.G) == annoG$SampleID)){
+  print("CAUTION: Sample order does not match!!")
+}
+
+
+### ### ### ### ###
+#### designate counts to be used and name of files to be saved
+counts <- log.normCounts.G
+#phenoData <- annoM[,-c(8:42)]
+phenoData <- annoG[,-c(8:42)]
+fileName <- "Gas.allgenes"
+####  ###  ###  ###
+
+
+
+# low-expression filter for this particular sample set - 
+  # 
+keepRows <- rowSums((counts) <= 5) <= (ncol(counts)*.9)  # log2(16)=4
+print("Genes that pass expression filter 1:")
+table(keepRows) 
+counts<- counts[keepRows,]      
+
+
+datExpr0 <- t(counts)
+
+# Quality control on genes- checks for too many missing values
+gsg = goodSamplesGenes(datExpr0, verbose = 3);
+gsg$allOK
+
+# If above is FALSE, then remove bad samples
+if (!gsg$allOK)
+{
+  # Optionally, print the gene and sample names that were removed:
+  if (sum(!gsg$goodGenes)>0)
+    printFlush(paste("Removing genes:", paste(names(datExpr0)[!gsg$goodGenes], collapse = ", ")));
+  if (sum(!gsg$goodSamples)>0)
+    printFlush(paste("Removing samples:", paste(rownames(datExpr0)[!gsg$goodSamples], collapse = ", ")));
+  # Remove the offending genes and samples from the data:
+  datExpr0 = datExpr0[gsg$goodSamples, gsg$goodGenes]
+}
+
+
+# Next cluster samples to see if there are any obvious outliers.
+sampleTree = hclust(dist(datExpr0), method = "average");
+# Plot the sample tree:
+#quartz()
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1,
+     cex.axis = 2, cex.main = 3)
+
+# Remove outlier by hand, or choose a branch cut height to remove any below that line.
+# Default was height of 15, but these libraries are much more diverse.  
+# Plot a line to show the cut
+abline(h = 160, col = "red");
+# Determine clusters produced by cutting at that height
+clust = cutreeStatic(sampleTree, cutHeight = 160, minSize = 10)
+table(clust)
+
+# # clust 1 contains the samples we want to keep.
+# keepSamples = (clust==1)
+# # Make dataframe for network analysis
+# datExpr = datExpr0[keepSamples, ]
+
+### if no outliers need to be removed:
+# datExpr <- datExpr0
+
+nGenes = ncol(datExpr)
+nSamples = nrow(datExpr)
+
+
+# Make data frame analogous to expression data that will hold the clinical traits.
+datTraits = phenoData[match(rownames(datExpr), phenoData$SampleID),]
+rownames(datTraits) <- datTraits$SampleID
+
+collectGarbage();
+
+
+### How do clinical traits relate to sample dendrogram? ###
+# # This is just a heat map of expression values for continuous variable clinical traits
+# # Re-cluster samples
+# sampleTree2 = hclust(dist(datExpr), method = "average")
+# 
+# ## Convert traits to a color representation:
+# 
+# # For NUMERIC scale traits:
+# #traitColors = numbers2colors(datTraits, signed = FALSE)  # white = low, red = high, grey = missing entry
+# 
+# # For CATEGORICAL traits:
+# labelcolors <- labels2colors(datTraits)
+# 
+# # Plot the clustered sample dendrogram with a heatmap of clinical traits underneath (not clustered).
+# plotDendroAndColors(sampleTree2, labelcolors,
+#                     groupLabels = names(datTraits),
+#                     main = "Sample dendrogram and trait heatmap")
+
+
+
+
+##### WGCNA Network analysis: custom step-by-step ###
+
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 2, to=30, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5, networkType="signed", blockSize=8000)
+# Plot the results:
+par(mfrow = c(1,2));
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+
+
+
+# We now calculate the adjacencies, using the soft thresholding power picked from above graph
+softPower = 14;  # for muscle - 14 (excluding 4 deep-sequenced soleus samples); AT - 16
+adjacency = adjacency(datExpr, type="signed", power = softPower);
+
+#To minimize effects of noise and spurious associations,
+# we transform the adjacency into Topological Overlap Matrix,
+# and calculate the corresponding dissimilarity:
+# (could put in your own correlation matrix instead of adjacency here)
+TOM = TOMsimilarity(adjacency);
+dissTOM = 1-TOM
+
+# Cluster the genes
+# Call the hierarchical clustering function
+geneTree = hclust(as.dist(dissTOM), method = "average");
+# Plot the resulting clustering tree (dendrogram)
+#quartz()
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+     labels = FALSE, hang = 0.04);
+
+# Now cut the tree to make modules
+# Normally we set min module at 25 genes for gene expression data:
+minModuleSize = 25;
+# Module identification using dynamic tree cut:
+# method is "hybrid" by default
+# deepsplit: 0 to 4, higher = more and smaller clusters
+# cutHeight: max joining heights that will be considered
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,
+                            deepSplit = 4, pamRespectsDendro = TRUE,
+                            minClusterSize = minModuleSize);
+# Look at modules made and their size:
+table(dynamicMods)
+length(unique(dynamicMods))
+
+# Convert numeric lables into colors
+dynamicColors = labels2colors(dynamicMods)
+table(dynamicColors)
+# Plot the dendrogram and colors underneath
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Gene dendrogram and module colors")
+
+## Merge modules whose expression is very similar
+## To quantify co-expression similarity of entire modules, we
+## calculate their eigengenes and cluster them on their correlation.
+
+# Calculate eigengenes
+MEList = moduleEigengenes(datExpr, colors = dynamicColors)
+MEs = MEList$eigengenes
+rownames(MEs) <- rownames(datExpr)
+
+#Examine module correlations
+# plotMEpairs(MEs)
+
+# pdf("Results/WGCNA/All Genes log2/MEpairs.test.pdf", height=10, width=10)
+# plotMEpairs(MEs)
+# dev.off()
+
+# Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs, use = "pairwise.complete.obs");
+# Cluster module eigengenes
+METree = hclust(as.dist(MEDiss), method = "average");
+# Plot the result
+plot(METree, main = "Clustering of module eigengenes",
+     xlab = "", sub = "")
+
+
+# We usually choose a height cut of 0.25, corresponding to correlation of 0.75,
+# to merge modules. (Shown as line on plot.)
+MEDissThres = 0.1  #.1 used for muscle (31 modules), .1 used for AT (88 modules)
+# Plot the cut line into the dendrogram
+abline(h=MEDissThres, col = "red")
+
+# Call an automatic merging function
+merge = mergeCloseModules(datExpr, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+# The merged module colors
+mergedColors = merge$colors;
+# Eigengenes of the new merged modules:
+mergedMEs = merge$newMEs;
+
+# Plot results of the merge:
+#quartz()
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors),
+                    c("Dynamic Tree Cut", "Merged dynamic"),
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+
+plotDendroAndColors(geneTree, mergedColors,
+                    c("Dynamic Tree Cut", "Merged dynamic"),
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+
+
+#Save for further analysis:
+# Rename to moduleColors
+moduleColors = mergedColors
+
+# Construct numerical labels corresponding to the colors
+colorOrder = c("grey", standardColors(50));
+moduleLabels = match(moduleColors, colorOrder)-1;
+MEs = mergedMEs
+rownames(MEs) <- rownames(datExpr)
+
+table(moduleColors)
+length(unique(moduleColors)) 
+# plotMEpairs(MEs)
+
+# plots are too small with a large number of modules
+pdfFileName <- paste0(paste0("Results/WGCNA/All Genes log2/", fileName), ".MEpairs.pdf")
+pdf(pdfFileName, height=9, width=9)
+plotMEpairs(MEs)
+dev.off()
+
+# write module eigengene expression table
+MEexpFileName <- paste0(paste0("Results/WGCNA/All Genes log2/", fileName), ".MEexp.csv")
+write.csv(MEs, file = MEexpFileName)
+
+
+##### module membership ###
+MEs = orderMEs(MEs)
+rownames(MEs) <- rownames(datExpr)
+
+# names (colors) of the modules
+modNames = substring(names(MEs), 3)
+
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="")
+
+# Create data frame with gene info and module membership, etc
+# ** use dynamicColors if you haven't merged modules, moduleColors if you have
+geneInfo0 = data.frame(MMG = colnames(datExpr),moduleColor = moduleColors)
+geneInfo <- merge(geneInfo0, geneModuleMembership, by.y="row.names", by.x="MMG")
+
+# write module info and membership
+# first put on HGNC and entrez IDs
+geneInfo <- merge(MMGtoHGNC, geneInfo, by="MMG")
+#geneInfo <- merge(genes[,c("GeneID", "EntrezGeneID")], geneInfo, by="EntrezGeneID")
+# Order the genes in the geneInfo variable module color
+geneInfo = geneInfo[order(geneInfo$moduleColor), ]
+MMfileName <- paste0(paste0("Results/WGCNA/All Genes log2/", fileName), ".Mods.csv")
+write.csv(geneInfo, file = MMfileName )
+
+```
+
+
+
+
+## Annotate modules  
+
+
+### Adipose
+
+
+```{r filter gene sets by AT expression for mod annotation}
+
+# since DEG analysis and WGCNA analysis currently have different low expression cut-offs, use MM gene list to filter for module annotation
+
+AT.MM <- read.csv("Results/WGCNA/All genes Log2/AT.allgenes.Mods.csv")
+AT.Mods <- AT.MM %>% select(2:6)
+
+AT.mod.names <- read.csv("Results/WGCNA/All Genes log2/AT.mod.numbers.csv")
+
+OBtrimGS.ATexpr <- filterGeneSets.ensg(AT.MM, OBtrim.GS, 10)$geneSets.filtered
+GObioProc.ATexpr <- filterGeneSets.ensg(AT.MM, GObioProc, 10)$geneSets.filtered
+Canon.ATexpr <- filterGeneSets.ensg(AT.MM, Canon, 10)$geneSets.filtered
+OBcan.ATexpr <- filterGeneSets.ensg(AT.MM, OBcan.GS, 10)$geneSets.filtered
+
+
+```
+
+
+
+```{r}
+
+
+
+
+# run annotation function with OBcan genesets
+modAnno.OBcan <- annotateModules(AT.MM, geneSets=OBcan.ATexpr, nTopMod=20)
+
+modAnno.OBcan.trim <- trimModuleAnnotation(modAnno.OBcan, numberNames=AT.mod.names, FDRcutoff=.25, numTop=10)
+
+
+#write to file.  *** modify file name with gene set collection used!
+modAnnoFileName <- paste0(paste0("Results/WGCNA/All genes Log2/AT.allgenes"), ".ModAnno.OBcan.trim.csv")
+write.csv(modAnno.OBcan.trim, modAnnoFileName)
+
+
+# run annotation function with GO biol process gene sets
+modAnno.GObioProc <- annotateModules(AT.MM, geneSets=GObioProc.ATexpr, nTopMod=20)
+
+modAnno.GObioProc.trim <- trimModuleAnnotation(modAnno.GObioProc, numberNames=AT.mod.names, FDRcutoff=.25, numTop=10)
+
+#write to file.  *** modify file name with gene set collection used!
+modAnnoFileName <- paste0(paste0("Results/WGCNA/All genes Log2/AT.allgenes"), ".ModAnno.GObio.trim.csv")
+write.csv(modAnno.GObioProc.trim, modAnnoFileName)
+
+```
+
+
+### Gastroc
+
+
+```{r filter gene sets by AT expression for mod annotation}
+
+# since DEG analysis and WGCNA analysis currently have different low expression cut-offs, use MM gene list to filter for module annotation
+
+Gas.MM <- read.csv("Results/WGCNA/All genes Log2/Gas.allgenes.Mods.csv")
+Gas.Mods <- Gas.MM %>% select(2:6)
+
+Gas.mod.names <- read.csv("Results/WGCNA/All Genes log2/Gas.mod.numbers.csv")
+
+
+OBtrimGS.Gexpr <- filterGeneSets.ensg(Gas.MM, OBtrim.GS, 10)$geneSets.filtered
+GObioProc.Gexpr <- filterGeneSets.ensg(Gas.MM, GObioProc, 10)$geneSets.filtered
+Canon.Gexpr <- filterGeneSets.ensg(Gas.MM, Canon, 10)$geneSets.filtered
+OBcan.Gexpr <- filterGeneSets.ensg(Gas.MM, OBcan.GS, 10)$geneSets.filtered
+
+
+```
+
+
+
+```{r}
+
+
+# run annotation function with OBcan genesets
+modAnno.OBcan <- annotateModules(Gas.MM, geneSets=OBcan.Gexpr, nTopMod=20)
+
+modAnno.OBcan.trim <- trimModuleAnnotation(modAnno.OBcan, numberNames=Gas.mod.names, FDRcutoff=.25, numTop=10)
+
+#write to file.  *** modify file name with gene set collection used!
+modAnnoFileName <- paste0(paste0("Results/WGCNA/All genes Log2/Gas.allgenes"), ".ModAnno.OBcan.trim.csv")
+write.csv(modAnno.OBcan.trim, modAnnoFileName)
+
+
+# run annotation function with GO biol process gene sets
+modAnno.GObioProc <- annotateModules(Gas.MM, geneSets=GObioProc.Gexpr, nTopMod=20)
+
+modAnno.GObioProc.trim <- trimModuleAnnotation(modAnno.GObioProc, numberNames=Gas.mod.names, FDRcutoff=.25, numTop=10)
+
+#write to file.  *** modify file name with gene set collection used!
+modAnnoFileName <- paste0(paste0("Results/WGCNA/All genes Log2/Gas.allgenes"), ".ModAnno.GObio.trim.csv")
+write.csv(modAnno.GObioProc.trim, modAnnoFileName)
+
+```
+
+
+
+## Plot expression of modules  
+```{r}
+
+
+##### plot expression of all modules ####
+
+#currently working with which modules?
+MEs <- read.csv("Results/WGCNA/All Genes log2/Gas.allgenes.MEexp.csv")
+names(MEs)[1] <- "SampleID"
+
+## merge module eigengenes and sample data
+MEs$SampleID <- rownames(MEs)
+MEanno <- merge(MEs, phenoData, by="SampleID")
+names(MEanno)[1] <- "SampleID"
+
+L.MEanno <- gather(MEanno, "Module", "ME.expr", 2:(ncol(MEs)) )
+L.MEanno$TissTreat <- paste(L.MEanno$Tissue, L.MEanno$Treatment, sep=".")
+# put groups in logical order
+  L.MEanno$TissTreat <- factor(L.MEanno$TissTreat, levels = c("Adipose.FGF21.Pre", "Adipose.FGF21.Post", "Adipose.FGF21.Wash", "Gastrocnemius.FGF21.Pre", "Gastrocnemius.FGF21.Post", "Gastrocnemius.FGF21.Wash", "Soleus.CalR.Pre", "Soleus.CalR.Post"))
+  # L.MEanno$TissTreat <- factor(L.MEanno$TissTreat, levels = c("Adipose.FGF21.Pre", "Adipose.FGF21.Post", "Adipose.FGF21.Wash"))
+  #L.MEanno$TissTreat <- factor(L.MEanno$TissTreat, levels = c("Soleus.CalR.Pre", "Soleus.CalR.Post"))
+  #L.MEanno$TissTreat <- factor(L.MEanno$TissTreat, levels = c("Gastrocnemius.FGF21.Pre","Gastrocnemius.FGF21.Post", "Gastrocnemius.FGF21.Wash", "Soleus.CalR.Pre", "Soleus.CalR.Post"))
+  #L.MEanno$TissTreat <- factor(L.MEanno$TissTreat, levels = c("Gastrocnemius.FGF21.Pre","Gastrocnemius.FGF21.Post", "Gastrocnemius.FGF21.Wash"))
+
+ L.MEanno$Treatment <- factor(L.MEanno$Treatment, levels = c("FGF21.Pre", "FGF21.Post", "FGF21.Wash", "CalR.Pre", "CalR.Post"))    
+  
+  
+modPlotsFileName <- paste0(paste0("Results/WGCNA/All Genes log2/", fileName), ".ModExpPlots.pdf")
+pdf(file=modPlotsFileName, height=50, width=10)
+
+# for treatment group
+ggplot(L.MEanno, aes(x=Treatment, y=ME.expr))+
+  #geom_boxplot(outlier.colour = NA)+
+  geom_line(aes(group=AnimalID), color="grey30")+
+  geom_point(size=3, shape=21, aes(fill=Treatment))+
+  #geom_point(size=2, position = position_jitter(width=.2))+
+  stat_summary(fun.y="mean", geom="point", shape=23, size=2, fill="white")+
+  facet_wrap(~Module, ncol=3, scales="free_y")+
+  xlab("Tissue and Treatment")+
+  labs(color="Tissue/Treatment")+
+  theme(legend.position = "top",  axis.text.x = element_text(angle=20, hjust=1, vjust=1))
+
+ dev.off()
+
+# ggplot(L.MEanno, aes(x=TissTreat, y=ME.expr, color=TissTreat))+
+#   geom_boxplot(outlier.colour = NA)+
+#   geom_point(size=2, position = position_jitter(width=.2))+
+#   facet_wrap(~Module, ncol=3, scales="free_y")+
+#   theme(axis.text.x = element_blank())+
+#   xlab("Tissue and Treatment")+
+#   labs(color="Tissue/Treatment")+
+#   theme(legend.position = c(.8,.2))
+
+# # by tissue type
+# ggplot(L.MEanno, aes(x=tissue, y=ME.expr, color=tissue))+
+#   geom_boxplot(outlier.colour = NA)+
+#   geom_point(size=2, position = position_jitter(width=.2))+
+#   facet_wrap(~Module, scales="free_y")+
+#   theme(axis.text.x = element_blank())+
+#   xlab("Sample label")+
+#   scale_color_manual(name = "Sample label",values=c("lightsalmon", "red4", "red"))+
+#   theme(legend.position = c(.83,.15))
+#
+# # by sex
+# ggplot(L.MEanno, aes(x=Cluster, y=ME.expr, color=Sex))+
+#   geom_boxplot(outlier.colour = NA)+
+#   geom_point(size=2, position = position_jitter(width=.2))+
+#   facet_wrap(~Module, scales="free_y")+
+#   theme(axis.text.x = element_blank())+
+#   xlab("PCA cluster")+
+#   scale_color_manual(name = "PCA cluster",values=c("springgreen4", "steelblue4", "red4"))+
+#   theme(legend.position = c(.83,.15))
+
+
+
+
+# # # by sex
+# modPlotsFileName <- paste0(paste0("Results/WGCNA/All Genes log2/", fileName), ".ModExpPlotsSex.pdf")
+# pdf(file=modPlotsFileName, height=50, width=10)
+# 
+# 
+# ggplot(L.MEanno, aes(x=Sex, y=ME.expr, color=Sex))+
+#   geom_boxplot(outlier.colour = NA)+
+#   geom_point(size=2, position = position_jitter(width=.2))+
+#   facet_wrap(~Module, scales="free_y", ncol=3)+
+#   theme(axis.text.x = element_blank())+
+#   xlab("PCA cluster")+
+#   scale_color_manual(name = "PCA cluster",values=c("springgreen4", "steelblue4"))+
+#   theme(legend.position = c(.83,.15))
+# 
+# dev.off()
+
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+#### plot expression of modules of interest ####
+
+
+#currently working with which modules?
+# MEs <- read.csv("Results/WGCNA/All Genes log2/Gas.allgenes.MEexp.csv")
+# names(MEs)[1] <- "SampleID"
+
+## merge module eigengenes and sample data
+MEanno <- merge(MEs, annoCR, by="SampleID")
+names(MEanno)[1] <- "SampleID"
+
+L.MEanno <- gather(MEanno, "Module", "ME.expr", 2:(ncol(MEs)) )
+L.MEanno$Treatment <- factor(L.MEanno$Treatment, levels = c("FGF21.Pre", "FGF21.Post", "FGF21.Wash", "CalR.Pre", "CalR.Post"))   
+   
+  
+  
+MOI=c("MEmidnightblue", "MEdarkorange")
+# for treatment group
+L.MEanno %>% filter(Tissue =="Soleus", Module %in% MOI) %>%
+ggplot(aes(x=Treatment, y=ME.expr))+
+  geom_line(aes(group=AnimalID), color="grey40")+
+    #geom_boxplot(outlier.color=NA, aes(color=Treatment))+
+    stat_summary(fun.y="mean", geom="point", shape="-", size=25, color="grey20" )+
+    geom_point(size=3, shape=21, aes(fill=AnimalID))+
+  facet_wrap(~Module, ncol=3)+
+  xlab("Treatment")+
+  ylab("Module eigengene expression")+
+  labs(color="Treatment")+
+  ggtitle("Gastroc Tissue")+
+  theme(legend.position = "top",  axis.text.x = element_text(angle=20, hjust=1, vjust=1))
+
+
+
+```
+
+
+
+
+```{r correlate modules to each other}
+
+# Adipose Modules
+AT.MEcor <- as.data.frame(cor(AT.MEs[,-c(1,ncol(AT.MEs))]))
+AT.MEcor$Module <- names(AT.MEcor)
+
+topCor <- function(MOI, MEcor, nTop=10){
+  MEcor %>% arrange(desc(abs(eval(as.name(MOI))))) %>% select(one_of(MOI, "Module")) %>% slice(1:nTop)
+}
+
+topCor(MOI="MEmediumpurple3", MEcor=AT.MEcor, nTop=10)
+
+MEcorFileName <- paste0(paste0("Results/WGCNA/All Genes log2/", "AT"), ".MECor.csv")
+write.csv(as.data.frame(AT.MEcor), MEcorFileName, row.names=FALSE)
+
+# heatmap
+heatmap.plus(as.matrix(AT.MEcor[,-ncol(AT.MEcor)]))
+
+
+
+# Gastroc Modules
+Gas.MEcor <- as.data.frame(cor(Musc.MEs[,-c(1,ncol(Musc.MEs))]))
+Gas.MEcor$Module <- names(Gas.MEcor)
+
+#topCor(MOI="MEmediumpurple3", MEcor=Gas.MEcor, nTop=10)
+
+MEcorFileName <- paste0(paste0("Results/WGCNA/All Genes log2/", "Gas"), ".MECor.csv")
+write.csv(as.data.frame(Gas.MEcor), MEcorFileName, row.names=FALSE)
+
+# heatmap
+heatmap.plus(as.matrix(Gas.MEcor[,-ncol(Gas.MEcor)]))
+
+```
+
+
+## Test modules for differential expression
+
+
+```{r DE WGCNA modules wilcox test}
+
+# what stats test to use on module eigengene expression??
+# wilcox.test(A, B, paired=TRUE)
+
+# run tests for postvspre, washvspre, washvspost
+
+
+
+## AT with AT mods ####
+
+AT.MEs <- read.csv("Results/WGCNA/All Genes log2/AT.allgenes.MEexp.csv")
+names(AT.MEs)[1] <- "SampleID"
+
+## merge module eigengenes and sample data
+# MEs$SampleID <- rownames(MEs)
+MEanno <- merge(AT.MEs, annoAT[,-c(8:42)], by="SampleID")
+L.MEanno <- gather(MEanno, "Module", "ME.expr", 2:(ncol(AT.MEs)-1) )
+
+MEanno.sp <- L.MEanno[,c("AnimalID", "Treatment", "Tissue", "Module", "ME.expr")]
+MEanno.sp <- spread(MEanno.sp, Treatment, ME.expr)
+
+# need to get samples in order of animal for paired test, and exclude any samples that don't have their pairs
+table(MEanno$AnimalID, MEanno$Treatment)
+
+# AT post vs pre
+AT.postvspre.DEmods.w <- MEanno.sp %>% select(-FGF21.Wash) %>%  # get rid of treatment not in comparison
+      filter(!AnimalID %in% c("19832")) %>%  #ditch samples that have no paired sample
+      arrange(Module, AnimalID) %>%    #order by animalID for correct pairing
+      group_by(Module) %>% 
+      summarise(pvalue= wilcox.test(FGF21.Post, FGF21.Pre, data=., paired=TRUE)$p.value) %>%
+      mutate(adj.pval = p.adjust(pvalue, method="BH")) %>%
+      arrange(pvalue)
+names(AT.postvspre.DEmods.w) <- c("Module", "PostvPre.pval", "PostvPre.adjP")
+
+
+# AT wash vs pre
+AT.washvspre.DEmods.w <- MEanno.sp %>% select(-FGF21.Post) %>%  # get rid of treatment not in comparison
+      filter(!AnimalID %in% c("19832", "20456", "22130")) %>%  #ditch samples that have no paired sample
+      arrange(Module, AnimalID) %>%    #order by animalID for correct pairing
+      group_by(Module) %>% 
+      summarise(pvalue= wilcox.test(FGF21.Wash, FGF21.Pre, data=., paired=TRUE)$p.value) %>%
+      mutate(adj.pval = p.adjust(pvalue, method="BH")) %>%
+      arrange(pvalue)
+names(AT.washvspre.DEmods.w) <- c("Module", "WashvPre.pval", "WashvPre.adjP")
+
+
+# AT wash vs post
+AT.washvspost.DEmods.w <- MEanno.sp %>% select(-FGF21.Pre) %>%  # get rid of treatment not in comparison
+      filter(!AnimalID %in% c("19832", "20456", "22130")) %>%  #ditch samples that have no paired sample
+      arrange(Module, AnimalID) %>%    #order by animalID for correct pairing
+      group_by(Module) %>% 
+      summarise(pvalue= wilcox.test(FGF21.Wash, FGF21.Post, data=., paired=TRUE)$p.value) %>%
+      mutate(adj.pval = p.adjust(pvalue, method="BH")) %>%
+      arrange(pvalue)
+names(AT.washvspost.DEmods.w) <- c("Module", "WashvPost.pval", "WashvPost.adjP")
+
+
+# put AT comparisons together
+AT.DEmods.w <- merge(AT.postvspre.DEmods.w, AT.washvspre.DEmods.w, by="Module")
+AT.DEmods.w <- merge(AT.DEmods.w, AT.washvspost.DEmods.w, by="Module")
+AT.DEmods.w <- arrange(AT.DEmods.w, PostvPre.pval, WashvPre.pval)
+
+# write.csv(AT.DEmods.w, "Results/WGCNA/All Genes log2/AT.wilcox.DEmods.csv")
+AT.DEmods.w  <- read.csv("Results/WGCNA/All Genes log2/AT.wilcox.DEmods.csv")
+AT.DEmods.w <- AT.DEmods.w[,-1]
+
+#### Calculate fold changes in MEs between treatment and control ####
+
+MEmedians <- MEanno.sp %>% group_by(Module) %>%
+              summarise_at(vars(FGF21.Post:FGF21.Wash), .funs=median, na.rm=TRUE) %>%
+              mutate(PostvsPre.FC = FGF21.Post/FGF21.Pre, 
+                     WashvsPre.FC = FGF21.Wash/FGF21.Pre,
+                     WashvsPost.FC = FGF21.Wash/FGF21.Post)
+names(MEmedians)[2:4] <- paste0(names(MEmedians)[2:4], ".medExpr")
+  
+AT.mods.DE.med <- AT.DEmods.w %>% left_join(MEmedians)
+
+# write.csv(AT.mods.DE.med, "Results/WGCNA/All Genes log2/AT.mods.DEtest.and.medExpr.csv", row.names=FALSE)
+
+
+
+# #test one
+# MEanno.sp %>% select(-FGF21.Wash) %>%  # get rid of treatment not in comparison
+#       filter(!AnimalID %in% c("19832")) %>%  #ditch samples that have no paired sample
+#       arrange(Module, AnimalID) %>%
+#       filter(Module=="MEantiquewhite2") %>%
+#       with(., wilcox.test(FGF21.Post, FGF21.Pre,  paired=TRUE))
+# 
+
+
+# Gastroc with Muscle mods #####
+
+#currently working with which modules?
+MEs <- read.csv("Results/WGCNA/All Genes log2/Gas.allgenes.MEexp.csv")
+names(MEs)[1] <- "SampleID"
+
+## merge module eigengenes and sample data
+# MEs$SampleID <- rownames(MEs)
+MEanno <- merge(MEs, annoG[,-c(8:42)], by="SampleID")
+L.MEanno <- gather(MEanno, "Module", "ME.expr", 2:(ncol(MEs)) )
+
+MEanno.sp <- L.MEanno[,c("AnimalID", "Treatment", "Tissue", "Module", "ME.expr")]
+MEanno.sp <- spread(MEanno.sp, Treatment, ME.expr)
+
+# need to get samples in order of animal for paired test, and exclude any samples that don't have their pairs
+table(MEanno$AnimalID, MEanno$Treatment)
+
+
+
+# Gas post vs pre
+Gas.postvspre.DEmods.w <- MEanno.sp %>% select(-FGF21.Wash) %>%  # get rid of treatment not in comparison
+      filter(!AnimalID %in% c("20456", "21866")) %>%  #ditch samples that have no paired sample
+      arrange(Module, AnimalID) %>%    #order by animalID for correct pairing
+      group_by(Module) %>% 
+      summarise(pvalue= wilcox.test(FGF21.Post, FGF21.Pre, data=., paired=TRUE)$p.value) %>%
+      mutate(adj.pval = p.adjust(pvalue, method="BH")) %>%
+      arrange(pvalue)
+names(Gas.postvspre.DEmods.w) <- c("Module", "PostvPre.pval", "PostvPre.adjP")
+
+# Gas wash vs pre
+Gas.washvspre.DEmods.w <- MEanno.sp %>% select(-FGF21.Post) %>%  # get rid of treatment not in comparison
+      filter(!AnimalID %in% c("20456")) %>%  #ditch samples that have no paired sample
+      arrange(Module, AnimalID) %>%    #order by animalID for correct pairing
+      group_by(Module) %>% 
+      summarise(pvalue= wilcox.test(FGF21.Wash, FGF21.Pre, data=., paired=TRUE)$p.value) %>%
+      mutate(adj.pval = p.adjust(pvalue, method="BH")) %>%
+      arrange(pvalue)
+names(Gas.washvspre.DEmods.w) <- c("Module", "WashvPre.pval", "WashvPre.adjP")
+
+
+# Gas wash vs post
+Gas.washvspost.DEmods.w <- MEanno.sp %>% select(-FGF21.Pre) %>%  # get rid of treatment not in comparison
+      filter(!AnimalID %in% c("21866")) %>%  #ditch samples that have no paired sample
+      arrange(Module, AnimalID) %>%    #order by animalID for correct pairing
+      group_by(Module) %>% 
+      summarise(pvalue= wilcox.test(FGF21.Wash, FGF21.Post, data=., paired=TRUE)$p.value) %>%
+      mutate(adj.pval = p.adjust(pvalue, method="BH")) %>%
+      arrange(pvalue)
+names(Gas.washvspost.DEmods.w) <- c("Module", "WashvPost.pval", "WashvPost.adjP")
+
+
+# put Gastroc comparisons together
+Gas.DEmods.w <- merge(Gas.postvspre.DEmods.w, Gas.washvspre.DEmods.w, by="Module")
+Gas.DEmods.w <- merge(Gas.DEmods.w, Gas.washvspost.DEmods.w, by="Module")
+Gas.DEmods.w <- arrange(Gas.DEmods.w, PostvPre.pval, WashvPre.pval)
+
+# write.csv(Gas.DEmods.w, "Results/WGCNA/All Genes log2/Gas.NEW.wilcox.DEmods.csv")
+
+```
+
+
+
+
+
+
+# Degree of weight loss
+
+## Test for confounding factors  
+
+Want to test for association between magnitude of change in gene/module expression and the degree of weight loss, but need to check whether degree of weight loss is associated with any confounding factors like Sex or starting weight.
+
+```{r}
+
+phenoAnimal <- read.csv("Data/phenoData_fgf21/phenoBasicsByAnimal.csv")
+
+#anno for AT
+annoAT.PD <- annoAT[,1:6]
+annoAT.PD <- merge(annoAT.PD, phenoAnimal, by.x="AnimalID", by.y="AnimalID")
+
+# anno for Gastroc
+annoG.PD <- annoG[,1:6]
+annoG.PD <- merge(annoG.PD, phenoAnimal,  by.x="AnimalID", by.y="AnimalID")
+
+
+
+# degree of weight loss vs starting weight is not significantly correlated.
+
+ggplot(annoAT.PD, aes(x=startWeight, y=BWpctChange_maxCh))+
+  geom_point(aes(color = Sex))
+
+
+cor.test(annoAT.PD$startWeight, annoAT.PD$BWpctChange_maxCh, method = "spearman")
+
+
+```
+
+
+
+
+
+## Modules: magnitude of change associated with degree of weight loss  
+
+!! Note: Tried both a linear model including sex and one without sex.  Results did not differ very much (ie, ranking of significant differences), so went with simpler model that does not include sex.
+
+```{r}
+
+phenoAnimal <- read.csv("Data/phenoData_fgf21/phenoBasicsByAnimal.csv")
+
+#anno for AT
+annoAT.PD <- annoAT[,1:6]
+annoAT.PD <- merge(annoAT.PD, phenoAnimal, by.x="AnimalID", by.y="AnimalID")
+
+# anno for Gastroc
+annoG.PD <- annoG[,1:6]
+annoG.PD <- merge(annoG.PD, phenoAnimal,  by.x="AnimalID", by.y="AnimalID")
+
+
+##### adipose #####
+
+# make a table of module changes
+
+AT.MEs <- read.csv("Results/WGCNA/All Genes log2/AT.allgenes.MEexp.csv")
+names(AT.MEs)[1] <- "SampleID"
+
+## merge module eigengenes, sample data, and phenodata
+AT.ME.PDanno <- merge(annoAT.PD, AT.MEs[,], by="SampleID")
+
+AT.MEchanges <- AT.ME.PDanno %>% select(AnimalID, Treatment, Sex, MEcoral:MEplum1) %>%
+  gather("Module", "ME.expr", MEcoral:MEplum1) %>%
+  spread(Treatment, ME.expr)
+
+AT.MEchanges <- AT.MEchanges %>% mutate(Post.Pre = FGF21.Post-FGF21.Pre, Wash.Post = FGF21.Wash-FGF21.Post, AnimalID = as.character(AnimalID) )
+
+phenoAnimal$AnimalID <- as.character(phenoAnimal$AnimalID)
+AT.MEchanges <- AT.MEchanges %>% left_join(phenoAnimal, by=c("AnimalID"="AnimalID"))
+
+# make separate data frames for pre and post
+AT.ME.PostvPre <- AT.MEchanges %>% select(-c(FGF21.Post:FGF21.Wash, Wash.Post))
+AT.ME.PostvPre <- spread(AT.ME.PostvPre, "Module", "Post.Pre")
+# write.csv(AT.ME.PostvPre, "Results/WGCNA/All Genes log2/AT.ME.PostvPre.pctCh.csv", row.names = FALSE)
+
+
+AT.ME.WashvPost <- AT.MEchanges %>% select(-c(FGF21.Post:FGF21.Wash, Post.Pre))
+AT.ME.WashvPost <- spread(AT.ME.WashvPost, "Module", "Wash.Post")
+# write.csv(AT.ME.WashvPost, "Results/WGCNA/All Genes log2/AT.ME.WashvPost.pctCh.csv", row.names = FALSE)
+
+
+
+## set up for linear model
+
+# Post vs Pre
+Design <- AT.ME.PostvPre
+Data <- AT.ME.PostvPre
+
+
+# make design matrix
+  Indiv <- factor(Design$AnimalID)
+  Sex <- factor(Design$Sex)
+  BWmaxCh <- Design$BWpctChange_Wash.w2
+  TAGpctCh <- Design$TAGpctCh_maxCh
+
+#make an empty table to populate with p values and estimates (similar to lfc in limma)
+LMmods.Change.treat <- as.data.frame(matrix(nrow=ncol(AT.MEs)-2, ncol=13))
+names(LMmods.Change.treat) <- c("Module", "TAG.Est.s", "TAG.Pval.s", "TAG.adjPval.s", "BW.Est.s", "BW.Pval.s", "BW.adjPval.s", "TAG.Est", "TAG.Pval", "TAG.adjPval", "BW.Est", "BW.Pval", "BW.adjPval")
+LMmods.Change.treat$Module <- names(AT.MEs)[-c(1,73)]
+
+for (i in 1:nrow(LMmods.Change.treat)){
+  module <- LMmods.Change.treat$Module[i]
+  
+  fit1 <-  lm(paste(module, "~TAGpctCh+Sex"), data=Data)  
+  LMmods.Change.treat$TAG.Est.s[i] <- summary(fit1)$coefficients[2,1]
+  LMmods.Change.treat$TAG.Pval.s[i] <- summary(fit1)$coefficients[2,4]
+  
+  fit2 <-  lm(paste(module, "~BWmaxCh+Sex"), data=Data)  
+  LMmods.Change.treat$BW.Est.s[i] <- summary(fit2)$coefficients[2,1]
+  LMmods.Change.treat$BW.Pval.s[i] <- summary(fit2)$coefficients[2,4]
+  
+  fit3 <-  lm(paste(module, "~TAGpctCh"), data=Data)  
+  LMmods.Change.treat$TAG.Est[i] <- summary(fit3)$coefficients[2,1]
+  LMmods.Change.treat$TAG.Pval[i] <- summary(fit3)$coefficients[2,4]
+  
+  fit4 <-  lm(paste(module, "~BWmaxCh"), data=Data)  
+  LMmods.Change.treat$BW.Est[i] <- summary(fit4)$coefficients[2,1]
+  LMmods.Change.treat$BW.Pval[i] <- summary(fit4)$coefficients[2,4]
+}
+
+#adjust p values
+LMmods.Change.treat$BW.adjPval.s <- p.adjust(LMmods.Change.treat$BW.Pval.s, method="BH",n=nrow(LMmods.Change.treat))
+LMmods.Change.treat$TAG.adjPval.s <- p.adjust(LMmods.Change.treat$TAG.Pval.s, method="BH",n=nrow(LMmods.Change.treat))
+LMmods.Change.treat$BW.adjPval <- p.adjust(LMmods.Change.treat$BW.Pval, method="BH",n=nrow(LMmods.Change.treat))
+LMmods.Change.treat$TAG.adjPval <- p.adjust(LMmods.Change.treat$TAG.Pval, method="BH",n=nrow(LMmods.Change.treat))
+
+# write.csv(LMmods.Change.treat, "Results/WGCNA/All Genes log2/LMresults.AT.treat.BW.TAG.maxCh.csv", row.names = FALSE)
+
+LMmods.Change.treat<- read.csv("Results/WGCNA/All Genes log2/LMresults.AT.treat.BW.TAG.maxCh.csv")
+
+# plot some top mods!
+LMmods.Change.treat %>% arrange(BW.Pval) %>% filter(BW.Pval < .06) 
+mods <- c("MEmediumorchid", "MEpink", "MEgrey60", "MEturquoise", "MEplum3", "MEdarkred", "MEcoral3")
+
+P <- plotChangeModPhenoCor(ME.change=AT.ME.PostvPre, Mods=mods, pheno="BWpctChange_Wash.w2",  ncol=5, title="Change in module expression and pheno variable")
+P + xlab("Max % change in body weight") + scale_color_manual(values="navyblue")
+
+# what if we just do a correlation instead of linear model?  
+cor.test(Data$BWpctChange_maxCh, Data$MEgrey60)
+
+
+## do changes in any module during pre to post predict weight regain? #####
+
+# Body weight regain  - do changes in
+Design <- AT.ME.PostvPre
+Data <- AT.ME.PostvPre
+
+# make design matrix
+  Indiv <- factor(Design$AnimalID)
+  Sex <- factor(Design$Sex)
+  BWregain <- Design$BWpctChange_pctRegain
+
+#make an empty table to populate with p values and estimates (similar to lfc in limma)
+LMmods.Ch.regain <- as.data.frame(matrix(nrow=ncol(AT.MEs)-2, ncol=7))
+names(LMmods.Ch.regain) <- c("Module",  "BW.Est.s", "BW.Pval.s", "BW.adjPval.s",  "BW.Est", "BW.Pval", "BW.adjPval")
+LMmods.Ch.regain$Module <- names(AT.MEs)[-c(1,73)]
+
+for (i in 1:nrow(LMmods.Ch.regain)){
+  module <- LMmods.Ch.regain$Module[i]
+  
+  fit2 <-  lm(paste(module, "~BWregain+Sex"), data=Data)  
+  LMmods.Ch.regain$BW.Est.s[i] <- summary(fit2)$coefficients[2,1]
+  LMmods.Ch.regain$BW.Pval.s[i] <- summary(fit2)$coefficients[2,4]
+ 
+  fit4 <-  lm(paste(module, "~BWregain"), data=Data)  
+  LMmods.Ch.regain$BW.Est[i] <- summary(fit4)$coefficients[2,1]
+  LMmods.Ch.regain$BW.Pval[i] <- summary(fit4)$coefficients[2,4]
+}
+
+#adjust p values
+LMmods.Ch.regain$BW.adjPval.s <- p.adjust(LMmods.Ch.regain$BW.Pval.s, method="BH",n=nrow(LMmods.Ch.regain))
+LMmods.Ch.regain$BW.adjPval <- p.adjust(LMmods.Ch.regain$BW.Pval, method="BH",n=nrow(LMmods.Ch.regain))
+
+# write.csv(LMmods.Ch.regain, "Results/WGCNA/All Genes log2/LMresults.AT.modCh.predictRegain.csv", row.names = FALSE)
+
+LMmods.Ch.regain<- read.csv("Results/WGCNA/All Genes log2/LMresults.AT.modCh.predictRegain.csv")
+
+# plot some top mods!
+topMods <- LMmods.Change.treat %>% arrange(BW.Pval) %>% slice(1:8)
+#mods <- c("MEmediumorchid", "MEpink", "MEgrey60", "MEturquoise", "MEplum3", "MEdarkred", "MEcoral3")
+
+P <- plotChangeModPhenoCor(ME.change=AT.ME.PostvPre, Mods=topMods$Module, pheno="BWpctChange_pctRegain",  ncol=4, title="Change in module expression and pheno variable")
+P + xlab("Percent body weight regain from minimum") + scale_color_manual(values="navyblue")
+
+# plot loss vs regain
+
+ggplot(AT.ME.PostvPre, aes(x=BWpctChange_Wash.w2, y=BWpctChange_pctRegain))+
+  geom_point()
+
+
+
+
+
+
+# Body weight regain  - do changes in post to wash expression associate with weight regain?
+Design <- AT.ME.WashvPost
+Data <- AT.ME.WashvPost
+
+# make design matrix
+  Indiv <- factor(Design$AnimalID)
+  Sex <- factor(Design$Sex)
+  BWregain <- Design$BWpctChange_pctRegain
+
+#make an empty table to populate with p values and estimates (similar to lfc in limma)
+LMmods.Ch.regain <- as.data.frame(matrix(nrow=ncol(AT.MEs)-2, ncol=7))
+names(LMmods.Ch.regain) <- c("Module",  "BW.Est.s", "BW.Pval.s", "BW.adjPval.s",  "BW.Est", "BW.Pval", "BW.adjPval")
+LMmods.Ch.regain$Module <- names(AT.MEs)[-c(1,73)]
+
+for (i in 1:nrow(LMmods.Ch.regain)){
+  module <- LMmods.Ch.regain$Module[i]
+  
+  fit2 <-  lm(paste(module, "~BWmaxCh+Sex"), data=Data)  
+  LMmods.Ch.regain$BW.Est.s[i] <- summary(fit2)$coefficients[2,1]
+  LMmods.Ch.regain$BW.Pval.s[i] <- summary(fit2)$coefficients[2,4]
+ 
+  fit4 <-  lm(paste(module, "~BWmaxCh"), data=Data)  
+  LMmods.Ch.regain$BW.Est[i] <- summary(fit4)$coefficients[2,1]
+  LMmods.Ch.regain$BW.Pval[i] <- summary(fit4)$coefficients[2,4]
+}
+
+#adjust p values
+LMmods.Ch.regain$BW.adjPval.s <- p.adjust(LMmods.Ch.regain$BW.Pval.s, method="BH",n=nrow(LMmods.Ch.regain))
+LMmods.Ch.regain$BW.adjPval <- p.adjust(LMmods.Ch.regain$BW.Pval, method="BH",n=nrow(LMmods.Ch.regain))
+
+# write.csv(LMmods.Ch.regain, "Results/WGCNA/All Genes log2/LMresults.AT.modCh.WvP.Regain.csv", row.names = FALSE)
+
+LMmods.Ch.regain<- read.csv("Results/WGCNA/All Genes log2/LMresults.AT.modCh.WvP.Regain.csv")
+
+
+```
+
+
+
+```{r Gastroc}
+#### GASTROC ####
+
+Musc.MEs <- read.csv("Results/WGCNA/All Genes log2/Gas.allgenes.MEexp.csv")
+names(Musc.MEs)[1] <- "SampleID"
+
+## merge module eigengenes, sample data, and phenodata
+Gas.ME.PDanno <- merge(annoG.PD, Musc.MEs[,-ncol(Musc.MEs)], by="SampleID")
+
+
+# make a table of module changes
+
+Gas.MEchanges <- Gas.ME.PDanno %>% select(AnimalID, Treatment, Sex, MEskyblue1:MEskyblue2) %>%
+  gather("Module", "ME.expr", MEskyblue1:MEskyblue2) %>%
+  spread(Treatment, ME.expr)
+
+Gas.MEchanges <- Gas.MEchanges %>% mutate(Post.Pre = FGF21.Post-FGF21.Pre, Wash.Post = FGF21.Wash-FGF21.Post )
+
+phenoAnimal$AnimalID <- as.character(phenoAnimal$AnimalID)
+Gas.MEchanges <- Gas.MEchanges %>% left_join(phenoAnimal, by=c("AnimalID"="AnimalID"))
+
+# make separate data frames for pre and post
+Gas.ME.PostvPre <- Gas.MEchanges %>% select(-c(FGF21.Post:FGF21.Wash, Wash.Post))
+Gas.ME.PostvPre <- spread(Gas.ME.PostvPre, "Module", "Post.Pre")
+# write.csv(Gas.ME.PostvPre, "Results/WGCNA/All Genes log2/Gas.NEW.ME.PostvPre.pctCh.csv", row.names = FALSE)
+
+
+Gas.ME.WashvPost <- Gas.MEchanges %>% select(-c(FGF21.Post:FGF21.Wash, Post.Pre))
+Gas.ME.WashvPost <- spread(Gas.ME.WashvPost, "Module", "Wash.Post")
+# write.csv(Gas.ME.WashvPost, "Results/WGCNA/All Genes log2/Gas.NEW.ME.WashvPost.pctCh.csv", row.names = FALSE)
+
+
+
+
+# Body weight loss  - do changes in pre vs post associate with amt weight lost?
+Design <- Gas.ME.PostvPre 
+Data <- Gas.ME.PostvPre
+
+# make design matrix
+  Indiv <- factor(Design$AnimalID)
+  Sex <- factor(Design$Sex)
+  BWloss <- Design$BWpctChange_maxCh
+
+#make an empty table to populate with p values and estimates (similar to lfc in limma)
+LMmods.Ch.loss <- as.data.frame(matrix(nrow=ncol(Musc.MEs)-2, ncol=7))
+names(LMmods.Ch.loss) <- c("Module",  "BW.Est.s", "BW.Pval.s", "BW.adjPval.s",  "BW.Est", "BW.Pval", "BW.adjPval")
+LMmods.Ch.loss$Module <- names(Musc.MEs)[-c(1,46)]
+
+for (i in 1:nrow(LMmods.Ch.loss)){
+  module <- LMmods.Ch.loss$Module[i]
+  
+  fit2 <-  lm(paste(module, "~BWregain+Sex"), data=Data)  
+  LMmods.Ch.loss$BW.Est.s[i] <- summary(fit2)$coefficients[2,1]
+  LMmods.Ch.loss$BW.Pval.s[i] <- summary(fit2)$coefficients[2,4]
+ 
+  fit4 <-  lm(paste(module, "~BWregain"), data=Data)  
+  LMmods.Ch.loss$BW.Est[i] <- summary(fit4)$coefficients[2,1]
+  LMmods.Ch.loss$BW.Pval[i] <- summary(fit4)$coefficients[2,4]
+}
+
+#adjust p values
+LMmods.Ch.loss$BW.adjPval.s <- p.adjust(LMmods.Ch.loss$BW.Pval.s, method="BH",n=nrow(LMmods.Ch.loss))
+LMmods.Ch.loss$BW.adjPval <- p.adjust(LMmods.Ch.loss$BW.Pval, method="BH",n=nrow(LMmods.Ch.loss))
+
+# write.csv(LMmods.Ch.loss, "Results/WGCNA/All Genes log2/LMresults.Gas.NEW.modCh.loss.csv", row.names = FALSE)
+
+
+
+
+
+
+# Body weight regain  - do changes in wash vs post associate with amt weight regained?
+Design <- Gas.ME.WashvPost 
+Data <- Gas.ME.WashvPost 
+
+# make design matrix
+  Indiv <- factor(Design$AnimalID)
+  Sex <- factor(Design$Sex)
+  BWregain <- Design$BWpctChange_pctRegain
+
+#make an empty table to populate with p values and estimates (similar to lfc in limma)
+LMmods.Ch.regain <- as.data.frame(matrix(nrow=ncol(Musc.MEs)-2, ncol=7))
+names(LMmods.Ch.regain) <- c("Module",  "BW.Est.s", "BW.Pval.s", "BW.adjPval.s",  "BW.Est", "BW.Pval", "BW.adjPval")
+LMmods.Ch.regain$Module <- names(Musc.MEs)[-c(1,46)]
+
+for (i in 1:nrow(LMmods.Ch.regain)){
+  module <- LMmods.Ch.regain$Module[i]
+  
+  fit2 <-  lm(paste(module, "~BWregain+Sex"), data=Data)  
+  LMmods.Ch.regain$BW.Est.s[i] <- summary(fit2)$coefficients[2,1]
+  LMmods.Ch.regain$BW.Pval.s[i] <- summary(fit2)$coefficients[2,4]
+ 
+  fit4 <-  lm(paste(module, "~BWregain"), data=Data)  
+  LMmods.Ch.regain$BW.Est[i] <- summary(fit4)$coefficients[2,1]
+  LMmods.Ch.regain$BW.Pval[i] <- summary(fit4)$coefficients[2,4]
+}
+
+#adjust p values
+LMmods.Ch.regain$BW.adjPval.s <- p.adjust(LMmods.Ch.regain$BW.Pval.s, method="BH",n=nrow(LMmods.Ch.regain))
+LMmods.Ch.regain$BW.adjPval <- p.adjust(LMmods.Ch.regain$BW.Pval, method="BH",n=nrow(LMmods.Ch.regain))
+
+# write.csv(LMmods.Ch.regain, "Results/WGCNA/All Genes log2/LMresults.Gas.NEW.modCh.Regain.csv", row.names = FALSE)
+
+Gas.LMmods.Ch.regain <- read.csv("Results/WGCNA/All Genes log2/LMresults.Gas.modCh.Regain.csv")
+
+
+
+
+```
+
+
+
+## Genes: magnitude of change associated with degree of weight loss
+
+```{r}
+##### adipose #####
+
+# make a table of gene expression changes
+counts <- t(lcpm.normCounts.AT)
+annoCounts <- merge(annoAT[,1:6], counts, by.y="row.names", by.x="SampleID")
+
+# !! This is broken - need to select correct columns to spread on (too many included currently) !!
+AT.Gchanges <- annoCounts %>% select(-SampleID) %>%
+  gather("MMG", "Gene.expr", 6:12938) %>%
+  spread(Treatment, Gene.expr)
+
+AT.Gchanges <- AT.Gchanges %>% mutate(Post.Pre = FGF21.Post-FGF21.Pre, Wash.Post = FGF21.Wash-FGF21.Post )
+
+phenoAnimal$AnimalID <- as.character(phenoAnimal$AnimalID)
+AT.Gchanges <- AT.Gchanges %>% left_join(phenoAnimal, by=c("AnimalID"="AnimalID"))
+
+# make separate data frames for pre and post
+AT.G.PostvPre <- AT.Gchanges %>% select(-c(FGF21.Post:FGF21.Wash, Wash.Post))
+AT.G.PostvPre <- spread(AT.G.PostvPre, "MMG", "Post.Pre")
+# write.csv(AT.G.PostvPre, "Results/DEG Correct Names2/AT.Genes.PostvPre.pctCh.csv", row.names = FALSE)
+
+
+AT.G.WashvPost <- AT.Gchanges %>% select(-c(FGF21.Post:FGF21.Wash, Post.Pre))
+AT.G.WashvPost <- spread(AT.G.WashvPost, "MMG", "Wash.Post")
+# write.csv(AT.G.WashvPost, "Results/DEG Correct Names2//AT.Genes.WashvPost.pctCh.csv", row.names = FALSE)
+
+
+
+## set up for linear model
+
+# Post vs Pre
+Design <- AT.G.PostvPre
+Data <- AT.G.PostvPre
+
+
+# make design matrix
+  Indiv <- factor(Design$AnimalID)
+  Sex <- factor(Design$Sex)
+  BWmaxCh <- Design$BWpctChange_Wash.w2
+  TAGpctCh <- Design$TAGpctCh_maxCh
+
+#make an empty table to populate with p values and estimates (similar to lfc in limma)
+LMgenes.Change.treat <- as.data.frame(matrix(nrow=ncol(counts), ncol=13))
+names(LMgenes.Change.treat) <- c("Module", "TAG.Est.s", "TAG.Pval.s", "TAG.adjPval.s", "BW.Est.s", "BW.Pval.s", "BW.adjPval.s", "TAG.Est", "TAG.Pval", "TAG.adjPval", "BW.Est", "BW.Pval", "BW.adjPval")
+LMgenes.Change.treat$MMG <- colnames(counts)
+
+for (i in 1:nrow(LMgenes.Change.treat)){
+#for (i in 1:10){
+  gene <- LMgenes.Change.treat$MMG[i]
+  
+  fit1 <-  lm(paste(gene, "~TAGpctCh+Sex"), data=Data)  
+  LMgenes.Change.treat$TAG.Est.s[i] <- summary(fit1)$coefficients[2,1]
+  LMgenes.Change.treat$TAG.Pval.s[i] <- summary(fit1)$coefficients[2,4]
+  
+  fit2 <-  lm(paste(gene, "~BWmaxCh+Sex"), data=Data)  
+  LMgenes.Change.treat$BW.Est.s[i] <- summary(fit2)$coefficients[2,1]
+  LMgenes.Change.treat$BW.Pval.s[i] <- summary(fit2)$coefficients[2,4]
+  
+  fit3 <-  lm(paste(gene, "~TAGpctCh"), data=Data)  
+  LMgenes.Change.treat$TAG.Est[i] <- summary(fit3)$coefficients[2,1]
+  LMgenes.Change.treat$TAG.Pval[i] <- summary(fit3)$coefficients[2,4]
+  
+  fit4 <-  lm(paste(gene, "~BWmaxCh"), data=Data)  
+  LMgenes.Change.treat$BW.Est[i] <- summary(fit4)$coefficients[2,1]
+  LMgenes.Change.treat$BW.Pval[i] <- summary(fit4)$coefficients[2,4]
+}
+
+#adjust p values
+LMgenes.Change.treat$BW.adjPval.s <- p.adjust(LMgenes.Change.treat$BW.Pval.s, method="BH",n=nrow(LMgenes.Change.treat))
+LMgenes.Change.treat$TAG.adjPval.s <- p.adjust(LMgenes.Change.treat$TAG.Pval.s, method="BH",n=nrow(LMgenes.Change.treat))
+LMgenes.Change.treat$BW.adjPval <- p.adjust(LMgenes.Change.treat$BW.Pval, method="BH",n=nrow(LMgenes.Change.treat))
+LMgenes.Change.treat$TAG.adjPval <- p.adjust(LMgenes.Change.treat$TAG.Pval, method="BH",n=nrow(LMgenes.Change.treat))
+
+LMgenes.Change.treat <- LMgenes.Change.treat[,-1]
+LMgenes.Change.treat <- merge(LMgenes.Change.treat, MMGtoHGNC,  by="MMG")
+LMgenes.Change.treat <- LMgenes.Change.treat[,c(1,14:16, 2:13)]
+
+write.csv(LMgenes.Change.treat, "Results/WGCNA/All Genes log2/LMresults.AT.gene.treat.BW.TAG.maxCh.csv", row.names = FALSE)
+
+# LMgenes.Change.treat<- read.csv("Results/WGCNA/All Genes log2/LMresults.AT.gene.treat.BW.TAG.maxCh.csv")
+
+# # plot some top mods!
+# LMgenes.Change.treat %>% arrange(BW.Pval) %>% filter(BW.Pval < .06) 
+# mods <- c("MEmediumorchid", "MEpink", "MEgrey60", "MEturquoise", "MEplum3", "MEdarkred", "MEcoral3")
+# 
+# P <- plotChangeModPhenoCor(ME.change=AT.ME.PostvPre, Mods=mods, pheno="BWpctChange_Wash.w2",  ncol=5, title="Change in module expression and pheno variable")
+# P + xlab("Max % change in body weight") + scale_color_manual(values="navyblue")
+# 
+# # what if we just do a correlation instead of linear model?  looks like worse p values.
+# cor.test(Data$BWpctChange_maxCh, Data$MEgrey60)
+
+
+## do changes in any module during pre to post predict weight regain? #####
+
+# Body weight regain  - do changes in
+Design <- AT.G.PostvPre
+Data <- AT.G.PostvPre
+
+# make design matrix
+  Indiv <- factor(Design$AnimalID)
+  Sex <- factor(Design$Sex)
+  BWregain <- Design$BWpctChange_pctRegain
+
+#make an empty table to populate with p values and estimates (similar to lfc in limma)
+LMgenes.Ch.regain <- as.data.frame(matrix(nrow=ncol(counts), ncol=7))
+names(LMgenes.Ch.regain) <- c("Module",  "BW.Est.s", "BW.Pval.s", "BW.adjPval.s",  "BW.Est", "BW.Pval", "BW.adjPval")
+LMgenes.Ch.regain$MMG <- colnames(counts)
+
+for (i in 1:nrow(LMgenes.Ch.regain)){
+  gene <- LMgenes.Ch.regain$MMG[i]
+  
+  fit2 <-  lm(paste(gene, "~BWregain+Sex"), data=Data)  
+  LMgenes.Ch.regain$BW.Est.s[i] <- summary(fit2)$coefficients[2,1]
+  LMgenes.Ch.regain$BW.Pval.s[i] <- summary(fit2)$coefficients[2,4]
+ 
+  fit4 <-  lm(paste(gene, "~BWregain"), data=Data)  
+  LMgenes.Ch.regain$BW.Est[i] <- summary(fit4)$coefficients[2,1]
+  LMgenes.Ch.regain$BW.Pval[i] <- summary(fit4)$coefficients[2,4]
+}
+
+#adjust p values
+LMgenes.Ch.regain$BW.adjPval.s <- p.adjust(LMgenes.Ch.regain$BW.Pval.s, method="BH",n=nrow(LMgenes.Ch.regain))
+LMgenes.Ch.regain$BW.adjPval <- p.adjust(LMgenes.Ch.regain$BW.Pval, method="BH",n=nrow(LMgenes.Ch.regain))
+
+LMgenes.Ch.regain <- LMgenes.Ch.regain[,-1]
+LMgenes.Ch.regain <- merge(LMgenes.Ch.regain, MMGtoHGNC,  by="MMG")
+LMgenes.Ch.regain<- LMgenes.Ch.regain[,c(1, 8:10, 2:7)]
+ 
+write.csv(LMgenes.Ch.regain, "Results/WGCNA/All Genes log2/LMresults.AT.geneCh.predictRegain.csv", row.names = FALSE)
+
+# LMgenes.Ch.regain<- read.csv("Results/WGCNA/All Genes log2/LMresults.AT.geneCh.predictRegain.csv")
+
+# # plot some top mods!
+# topMods <- LMgenes.Change.treat %>% arrange(BW.Pval) %>% slice(1:8)
+# #mods <- c("MEmediumorchid", "MEpink", "MEgrey60", "MEturquoise", "MEplum3", "MEdarkred", "MEcoral3")
+# 
+# P <- plotChangeModPhenoCor(ME.change=AT.ME.PostvPre, Mods=topMods$Module, pheno="BWpctChange_pctRegain",  ncol=4, title="Change in module expression and pheno variable")
+# P + xlab("Percent body weight regain from minimum") + scale_color_manual(values="navyblue")
+# 
+# # plot loss vs regain
+# 
+# ggplot(AT.ME.PostvPre, aes(x=BWpctChange_Wash.w2, y=BWpctChange_pctRegain))+
+#   geom_point()
+```
+
+
+
+
+
+# Gene set / pathway analysis II  
+
+## Post vs Pre DEG and BW assoc  
+
+```{r}
+
+LMgenes.Change.treat   <- read.csv("Results/Final Paper/LM.AT.geneCh.BW.TAG.maxCh.csv")
+
+# grab top DE genes assoc with treatment and change in BW
+
+# what are the genes that are significantly DE by treatment, AND magnitude is associated with change in BW??
+treatDE <- rankedList %>% filter(adj.P.Val <.25)
+DEandBWassoc <- LMgenes.Change.treat %>% filter(GeneID %in% treatDE$GeneID) %>% arrange(BW.Pval) 
+
+# DEandBWassoc %>% filter(BW.adjPval <.25) %>% nrow()
+# DEandBWassoc %>% filter(BW.adjPval <.25, BW.Est >0) %>% nrow()
+# DEandBWassoc %>% filter(BW.adjPval <.25, BW.Est <0) %>% nrow()
+
+# use 500 for round number and 622 for adj p < .25
+# write.csv(DEandBWassoc, file="Results/Final Paper/AT.PostVsPre_andBWchange.csv")
+
+# AT.PvPandBW.ob.GSE <- GSenrich.TopDEG(DEandBWassoc, fullGeneList = AT.PostVsPre.I$GeneID,  geneSets = OBtrimGS.expr, setSizes = c(100, 500, 622), nTopGS=20)
+# 
+# # write.csv(AT.PvPandBW.ob.GSE$topRanked, "Results/Final Paper/AT.PvPandBW.GSE.OB.v2_topRanked.csv")
+# 
+# AT.PvPandBW.hall.GSE <- GSenrich.TopDEG(DEandBWassoc, fullGeneList = AT.PostVsPre.I$GeneID,  geneSets = HallmarkGS.expr, setSizes = c(100, 500, 622), nTopGS=20)
+# 
+# # write.csv(AT.PvPandBW.hall.GSE$topRanked, "Results/Final Paper/AT.PvPandBW.GSE.Hall.v2_topRanked.csv")
+# 
+# 
+# AT.PvPandBW.GSE.HC2 <- GSenrich.TopDEG(DEandBWassoc, fullGeneList = AT.PostVsPre.I$GeneID,  geneSets = HandC2GS.expr, setSizes = c(100, 500, 622), nTopGS=50)
+# 
+# # write.csv(AT.PvPandBW.GSE.HC2$topRanked, "Results/Final Paper/AT.PvPandBW.GSE.HandC2_topRanked.csv")
+# 
+# 
+# AT.PvPandBW.canon.GSE <- GSenrich.TopDEG(DEandBWassoc, fullGeneList = AT.PostVsPre.I$GeneID,  geneSets = Canon.expr, setSizes = c(100, 500, 622), nTopGS=50)
+# 
+# # write.csv(AT.PvPandBW.canon.GSE$topRanked, "Results/Final Paper/AT.PvPandBW.GSE.Canon_topRanked.csv")
+
+#FOR PAPER
+AT.PvPandBW.GO.GSE <- GSenrich.TopDEG(DEandBWassoc, fullGeneList = AT.PostVsPre.I$GeneID,  geneSets = GObioProc.expr, setSizes = c(100, 500, 622), nTopGS=50)
+
+# write.csv(AT.PvPandBW.GO.GSE$topRanked, "Results/FINAL/AT.PvPandBW.GSE.GObioProc_topRanked.csv")
+
+AT.PvPandBW.OBcan.GSE <- GSenrich.TopDEG(DEandBWassoc, fullGeneList = AT.PostVsPre.I$GeneID,  geneSets = OBcan.expr, setSizes = c(100, 500, 622), nTopGS=50)
+
+# write.csv(AT.PvPandBW.OBcan.GSE$topRanked, "Results/FINAL/AT.PvPandBW.GSE.OBcan_topRanked.csv")
+
+
+
+```
+
+
+
+
+
+
+```{r, fig.height=10}
+## plot the genes that are in these significantly enriched gene sets
+geneSets <- HallmarkGS[-1,]
+phypResults <- AT.PostVsPre.GSE$adj.phypResults
+#grab names of significant gene sets
+minP <- as.data.frame(matrix(nrow=nrow(phypResults), ncol=2))
+names(minP) <- c("GeneSet", "minP")
+minP$GeneSet <- rownames(phypResults)
+minP$minP <- apply(phypResults, 1, min)
+minP <- minP %>% arrange(minP)
+sigGS <- minP[minP$minP<.05, ]
+
+# loop through each significantly enriched gene set and plot genes from top DE list
+i=1
+
+  GS <- sigGS$GeneSet[i]
+  enrichPval <- sigGS$minP[i]
+
+  # grab genes in those gene sets that were in top DE genes
+  rankedList <- AT.PostVsPre %>% filter(abs(logFC)>.137)
+  rankedList <- rankedList %>% arrange(adj.P.Val, P.Value)
+  
+  sigGSgenes <- geneSets[,colnames(geneSets) %in% GS]
+  sigGSgenes <- na.omit(unique(sigGSgenes))
+  sigGSgenes <- sigGSgenes[sigGSgenes %in% rankedList$HGNCsymbol[1:400]]
+  
+  # grab counts for those genes, first translate to MMG
+  sigGSgenes2 <- MMGtoHGNC %>% filter(HGNCsymbol %in% sigGSgenes)
+  sigGScounts <- lcpm.AT.norm.TMM[rownames(lcpm.AT.norm.TMM) %in% sigGSgenes2$MMG,]
+  sigGScounts <- merge(MMGtoHGNC, sigGScounts, by.x="MMG", by.y="row.names")
+  sigGScounts <- as.data.frame(t(sigGScounts[,-(1:2)]))
+  names(sigGScounts) <- sigGScounts[1,]
+  sigGScounts <- sigGScounts[-1,]
+
+  # attach sample info and plot
+  sigGScounts <- merge(annoAT[,c(1:4,38:39)], sigGScounts, by.x="SampleID", by.y="row.names")
+  L.sigGS <- gather(sigGScounts, "Gene", "lcpm", 7:ncol(sigGScounts))
+  L.sigGS$lcpm <- as.numeric(L.sigGS$lcpm)
+  L.sigGS$Treatment <- factor(L.sigGS$Treatment, levels=c("FGF21.Pre", "FGF21.Post", "FGF21.Wash", "CalR.Pre", "CalR.Post"))
+
+  ggplot(L.sigGS, aes(x=Treatment, y=lcpm, color=Treatment))+
+    geom_boxplot(outlier.fill=NA, outlier.color = NA)+
+    geom_point(size=2, position = position_jitter(width=.1))+
+    facet_wrap(~Gene, ncol=3, scales="free_y")+
+    theme(legend.position = "none", axis.text.x = element_text(angle=20, hjust=1, vjust=1))+
+    ggtitle(paste0(paste0(paste0("Top DE genes in gene set: \n", GS), ", adj p="), enrichPval))
+
+
+```
+
+
+
+# > Network details for Network plots
+```{r }
+#### Make nodes and edges for module network plots ####
+
+
+# want: node names, correlation of each node with each other node (trimmed to certain strength or significance), relation of each node to body weight (pval)
+
+
+# cor.test on all mods vs each other
+modcors <- data.frame(matrix(ncol=ncol(AT.MEs)-2, nrow=ncol(AT.MEs)-2))
+names(modcors) <- names(AT.MEs[,-c(1,73)])
+modcors$Modules <- names(AT.MEs[,-c(1,73)])
+
+modPs <- data.frame(matrix(ncol=ncol(AT.MEs)-2, nrow=ncol(AT.MEs)-2))
+names(modPs) <- names(AT.MEs[,-c(1,73)])
+modPs$Modules <- names(AT.MEs[,-c(1,73)])
+
+for(i in 1:71){
+  mod1 <- names(modcors)[i]
+  for(j in 1:71){
+    mod2 <- modcors$Modules[j]
+    cor1 <- cor.test(AT.MEs[,i+1], AT.MEs[,j+1], method="spearman")
+    modcors[i,j] <- round(cor1$estimate, 2)
+    modPs[i,j] <- cor1$p.value
+  }
+  
+}
+
+modcors.L <- modcors %>% gather("Mod1", "Cor", 1:71) %>%
+  rename(Mod2=Modules) %>% mutate(order=1:nrow(modcors.L))
+  
+modPs.L <- modPs %>% gather( "Mod1", "Pval", 1:71) %>%
+  rename(Mod2=Modules) 
+
+modcors <- data.frame( Mod1=modcors.L$Mod1, Mod2=modcors.L$Mod2, Cor= modcors.L$Cor, Pval = modPs.L$Pval)
+# get rid of modules vs self
+modcors.trim <- modcors %>% arrange(desc(Cor)) %>% slice(-c(1:71))
+# get rid of repeats
+newDF <- data.frame(t(apply(modcors.trim,1,sort)))
+modcors.trim <- modcors.trim[!duplicated(newDF),]
+
+# trim down to significant correlations
+modcors.trim$adjPval <- p.adjust(modcors.trim$Pval, method="BH")
+summary(abs(modcors.trim$Cor))
+modcors.trim2 <- modcors.trim %>% filter(abs(Cor) > .4, adjPval < .05 )
+
+#length(unique(c(modcors.trim2$Mod1, modcors.trim2$Mod2)))
+
+# add in more edge attributes
+modcors.trim2$distance <- 1-abs(modcors.trim2$Cor)
+
+
+# write.csv(modcors.trim2, "Results/WGCNA/All Genes log2/Network.edges.csv", row.names=FALSE)
+
+# node attribute table
+Mod.BW <- read.csv("Results/WGCNA/All Genes log2/LMresults.AT.treat.BW.TAG.maxCh.csv")
+
+Mod.PvP <- read.csv("Results/WGCNA/All Genes log2/AT.wilcox.DEmods.csv")
+
+nodeAtt <- merge(Mod.BW[,c("Module", "BW.adjPval")], Mod.PvP[,c("Module", "PostvPre.adjP")],by="Module")
+  
+nodeAtt$numGenes <- NA
+
+for(i in 1:71){
+  mod <- str_split_fixed(nodeAtt$Module[i], "ME", 2)[,2]
+  nodeAtt$numGenes[i] <- AT.mods %>% filter(moduleColor == mod) %>% nrow()
+}
+
+write.csv(nodeAtt, "Results/WGCNA/All Genes log2/Network.nodes.csv", row.names=FALSE)
+nodeAtt <- read.csv("Results/WGCNA/All Genes log2/Network.nodes.csv")
+
+# attach number names and module size
+  # "Results/WGCNA/All Genes log2/AT.mod.numbers.csv"
+nodeAtt <- nodeAtt %>% left_join(AT.mod.names, by="Module")
+nodeAtt <- nodeAtt %>% select(Module, moduleColor, modNumber, BW.adjPval, PostvPre.adjP, modSize)
+
+write.csv(nodeAtt, "Results/WGCNA/All Genes log2/Network.nodes2.csv", row.names = FALSE )
+
+
+
+
+#####
+
+
+
+
+
+
+### Modules based on gastroc only  #####
+
+# skeletal muscle
+SM.MEs <- read.csv("Results/WGCNA/All Genes log2/Gas.allgenes.MEexp.csv")
+names(SM.MEs)[1] <- "SampleID"
+
+SM.MEs <- SM.MEs %>% filter(SampleID %in% annoG$SampleID)
+
+SM.mods <- read.csv("Results/WGCNA/All Genes log2/Gas.allgenes.Mods.csv")
+SM.mods <- SM.mods[,-1]
+
+# want: node names, correlation of each node with each other node (trimmed to certain strength or significance), relation of each node to body weight (pval)
+
+# read in correct MEs, etc
+
+
+# cor.test on all mods vs each other
+modcors <- data.frame(matrix(ncol=ncol(SM.MEs)-2, nrow=ncol(SM.MEs)-2))
+names(modcors) <- names(SM.MEs[,-c(1,46)])
+modcors$Modules <- names(SM.MEs[,-c(1,46)])
+
+modPs <- data.frame(matrix(ncol=ncol(SM.MEs)-2, nrow=ncol(SM.MEs)-2))
+names(modPs) <- names(SM.MEs[,-c(1,46)])
+modPs$Modules <- names(SM.MEs[,-c(1,46)])
+
+for(i in 1:44){
+  mod1 <- names(modcors)[i]
+  for(j in 1:44){
+    mod2 <- modcors$Modules[j]
+    cor1 <- cor.test(SM.MEs[,i+1], SM.MEs[,j+1], method="spearman")
+    modcors[i,j] <- round(cor1$estimate, 2)
+    modPs[i,j] <- cor1$p.value
+  }
+  
+}
+
+modcors.L <- modcors %>% gather("Mod1", "Cor", 1:44) %>%
+  rename(Mod2=Modules)
+modcors.L$order <- 1:nrow(modcors.L)
+  
+modPs.L <- modPs %>% gather( "Mod1", "Pval", 1:44) %>%
+  rename(Mod2=Modules) 
+
+modcors <- data.frame( Mod1=modcors.L$Mod1, Mod2=modcors.L$Mod2, Cor= modcors.L$Cor, Pval = modPs.L$Pval)
+# get rid of modules vs self
+modcors.trim <- modcors %>% arrange(desc(Cor)) %>% slice(-c(1:44))
+# get rid of repeats
+newDF <- data.frame(t(apply(modcors.trim,1,sort)))
+modcors.trim <- modcors.trim[!duplicated(newDF),]
+
+# trim down to significant correlations
+modcors.trim$adjPval <- p.adjust(modcors.trim$Pval, method="BH")
+summary(abs(modcors.trim$Cor))
+modcors.trim2 <- modcors.trim %>% filter(abs(Cor) > .4, adjPval < .05 )
+
+#length(unique(c(modcors.trim2$Mod1, modcors.trim2$Mod2)))
+
+# add in more edge attributes
+modcors.trim2$distance <- 1-abs(modcors.trim2$Cor)
+
+
+# write.csv(modcors.trim2, "Results/WGCNA/All Genes log2/Gas.Network.edges.csv", row.names=FALSE)
+modcors.trim <- read.csv("Results/WGCNA/All Genes log2/Gas.Network.edges.csv")
+
+
+# quick plot to eyeball correlation
+ggplot(SM.MEs, aes(x=MEdarkslateblue, y=MElightsteelblue))+
+  geom_point()
+
+ggplot(SM.MEs, aes(x=MEdarkmagenta, y=MEivory))+
+  geom_point()
+
+
+
+
+# node attribute table
+# Mod.BW !! No modules were remotely associated with change in body weight, loss or regain.
+
+Mod.PvP <- read.csv("Results/WGCNA/All Genes log2/Gas.NEW.wilcox.DEmods.csv")
+
+nodeAtt <- Mod.PvP[,c("Module", "PostvPre.adjP")]
+  
+nodeAtt$numGenes <- NA
+
+for(i in 1:45){
+  mod <- str_split_fixed(nodeAtt$Module[i], "ME", 2)[,2]
+  nodeAtt$numGenes[i] <- SM.mods %>% filter(moduleColor == mod) %>% nrow()
+}
+
+# write.csv(nodeAtt, "Results/WGCNA/All Genes log2/SM.Network.nodes.csv", row.names=FALSE)
+nodeAtt <- read.csv("Results/WGCNA/All Genes log2/SM.Network.nodes.csv")
+
+# attach number names and module size
+nodeAtt <- nodeAtt %>% rename(modSize=numGenes) %>% arrange(desc(modSize))
+nodeAtt$modNumber <- c(paste("SM", 1:40, sep="_"), "SM_none", paste("SM", 41:44, sep="_"))
+nodeAtt$moduleColor <- str_split_fixed(nodeAtt$Module, "E",2)[,2]
+
+nodeAtt <- nodeAtt %>% select(Module,  moduleColor, modNumber, PostvPre.adjP, modSize)
+
+# write.csv(nodeAtt, "Results/WGCNA/All Genes log2/SM.Gas.NEW.Network.nodes.csv", row.names = FALSE )
+
+nodeAtt <- read.csv("Results/WGCNA/All Genes log2/SM.Gas.NEW.Network.nodes.csv")
+```
+
+
+# Tools  
+
+## Find a module annotated by certain gene sets  
+
+```{r look for modules}
+
+
+# find modules that are annotated by certain gene sets
+
+#read in module annotation for set of modules
+modAnno <- read.csv("Results/WGCNA/All Genes log2/AT.allgenes.ModAnno.HandOB.csv")
+modAnno <- modAnno[,-1]
+
+# put into a long table for filtering
+Modules <- names(modAnno[,seq(from=1,to=187, by=2)])
+modNames <- list()
+for(i in 1:length(Modules)){
+  modNames[[i]] <- rep(Modules[i], 20)
+}
+modNames <- c(unlist(modNames))
+
+L.modAnno <- data.frame(Module=modNames, GeneSet=c(unlist(unname(modAnno[,seq(from=1,to=187, by=2)]))), pval=c(unlist(unname(modAnno[,seq(from=2,to=188, by=2)]))))
+
+
+# filter for gene set of interest and/or pvalue
+L.modAnno %>% filter(grepl("tolerant", GeneSet, ignore.case=TRUE)) %>%
+  arrange(pval, Module)
+
+
+# look at annotations for one particular module
+MOI <- "sienna3"
+modAnno %>% select(contains(MOI))
+
+```
+
+
+
+## Overlap between two gene sets
+
+```{r}
+
+gs1 <- HandC2.GS$HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION
+gs2 <- HandC2.GS$HALLMARK_APICAL_JUNCTION
+IDform <- "GeneID"
+
+geneOverlap <- function(gs1, gs2, IDform=c("GeneID", "HGNCsymbol")){
+  
+  overlap <- unlist(gs1)[unlist(gs1) %in% unlist(gs2)]
+  MMGtoHGNC %>% filter(eval(as.name(IDform)) %in% overlap) %>%  
+                select(GeneID, HGNCsymbol)
+  
+}
+
+geneOverlap(gs1=HandC2.GS$HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION, 
+            gs2 <- HandC2.GS$HALLMARK_UV_RESPONSE_DN , IDform <- "GeneID")
+
+
+```
+
+
+
+
+
+## Which module genes are in annotating gene set?
+```{r}
+
+SM.MM <- SM.mods %>% select(3:5) %>% left_join(nodeAtt[,c(2,3,5)], by="moduleColor")
+
+
+### For the paper- to describe which genes from published gene set are in a certain module (reflecting annotation)
+
+# mitochondrial modules: 10, 16, 18, 42
+SM.MM %>% filter(modNumber == "SM_10") %>% 
+  filter(GeneID %in% unique(c( #OBtrim.GS$MOOTHA_MITOCHONDRIA, OBtrim.GS$HALLMARK_OXIDATIVE_PHOSPHORYLATION,
+    OBtrim.GS$combo_oxidative_phosphorylation, OBtrim.GS$combo_fatty_acid_metabolism #OBtrim.GS$HALLMARK_FATTY_ACID_METABOLISM, OBtrim.GS$WONG_MITOCHONDRIA_GENE_MODULE
+    )))
+
+SM.MM %>% filter(modNumber == "SM_16") %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$MOOTHA_MITOCHONDRIA, OBtrim.GS$HALLMARK_OXIDATIVE_PHOSPHORYLATION,
+    OBtrim.GS$combo_oxidative_phosphorylation,  OBtrim.GS$WONG_MITOCHONDRIA_GENE_MODULE
+    )))
+
+SM.MM %>% filter(modNumber == "SM_18") %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$MOOTHA_MITOCHONDRIA, OBtrim.GS$HALLMARK_OXIDATIVE_PHOSPHORYLATION,
+    OBtrim.GS$combo_oxidative_phosphorylation,  OBtrim.GS$WONG_MITOCHONDRIA_GENE_MODULE
+    )))
+
+# small module of 29, with 5 related genes
+SM.MM %>% filter(modNumber == "SM_42") %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$IPA_conversion.of.acyl.coenzymeA,
+OBtrim.GS$IPA_concentration.of.acyl.coenzymeA,
+OBtrim.GS$IPA_modification.of.acyl.coenzymeA,
+OBtrim.GS$MOOTHA_MITOCHONDRIA
+    )))
+
+## Insulin signaling:  37,8
+
+# 3 relevant genes out of 45
+SM.MM %>% filter(modNumber == "SM_37") %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$REACTOME_SIGNALING_BY_INSULIN_RECEPTOR, OBtrim.GS$combo_insulin_receptor_signaling
+    )))
+
+# 50 relevant genes out of 500
+SM.MM %>% filter(modNumber == "SM_8") %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$ROME_INSULIN_TARGETS_IN_MUSCLE_UP
+    )))
+
+
+# insulin resistance, adipogenesis
+# 15 relevant genes out of 47
+SM.MM %>% filter(modNumber == "SM_36") %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$IPA_Insulin.resistance
+    )))
+
+# 22 genes out of 47
+SM.MM %>% filter(modNumber == "SM_36") %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$IPA_Insulin.resistance, 
+                               OBtrim.GS$LI_ADIPOGENESIS_BY_ACTIVATED_PPARG,
+OBtrim.GS$STEGER_ADIPOGENESIS_UP,
+OBtrim.GS$REACTOME_TRANSCRIPTIONAL_REGULATION_OF_WHITE_ADIPOCYTE_DIFFERENTIATION,
+OBtrim.GS$GERHOLD_ADIPOGENESIS_UP,
+OBtrim.GS$NAKAMURA_ADIPOGENESIS_LATE_UP,
+OBtrim.GS$IPA_Mass.of.brown.adipose.tissue,
+OBtrim.GS$BURTON_ADIPOGENESIS_6
+    )))
+
+# 19 has 6/102, #2 has ~50/1480, 23 has 2/83
+SM.MM %>% filter(modNumber %in% c( "SM_19", "SM_2", "SM_23")) %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$BURTON_ADIPOGENESIS_12,
+OBtrim.GS$BURTON_ADIPOGENESIS_11,
+OBtrim.GS$BURTON_ADIPOGENESIS_8,
+OBtrim.GS$NAKAMURA_ADIPOGENESIS_LATE_DN,
+OBtrim.GS$BURTON_ADIPOGENESIS_PEAK_AT_2HR
+    )))
+
+
+# stemness, adipogenesis down SM_1
+SM.MM %>% filter(modNumber %in% c( "SM_1")) %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$STEGER_ADIPOGENESIS_DN,
+OBtrim.GS$BURTON_ADIPOGENESIS_8,
+OBtrim.GS$BURTON_ADIPOGENESIS_7,
+OBtrim.GS$GERHOLD_ADIPOGENESIS_DN
+    )))
+
+#200 genes of 1827
+SM.MM %>% filter(modNumber %in% c( "SM_1")) %>% 
+  filter(GeneID %in% unique(c( HandC2.GS$BOQUEST_STEM_CELL_UP
+HandC2.GS$HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION
+    )))
+
+
+SM.MM %>% filter(modNumber %in% c( "SM_9")) %>% 
+  filter(GeneID %in% unique(c( HandC2.GS$BURTON_ADIPOGENESIS_12
+    )))
+
+# similar to cell cycle inhibition, apoptosis, perhaps...
+SM.MM %>% filter(modNumber %in% c( "SM_9")) %>% 
+  filter(GeneID %in% unique(c( HandC2.GS$DACOSTA_UV_RESPONSE_VIA_ERCC3_DN,
+HandC2.GS$DACOSTA_UV_RESPONSE_VIA_ERCC3_COMMON_DN,
+HandC2.GS$DAZARD_RESPONSE_TO_UV_NHEK_DN
+    )))
+
+# glycolysis, myogenesis 78 genes out of 1126
+SM.MM %>% filter(modNumber %in% c( "SM_3")) %>% 
+  filter(GeneID %in% unique(c( OBtrim.GS$combo_glycolysis,
+OBtrim.GS$REACTOME_GLUCOSE_METABOLISM,
+OBtrim.GS$REACTOME_GLYCOGEN_BREAKDOWN_GLYCOGENOLYSIS,
+OBtrim.GS$HALLMARK_MYOGENESIS,
+OBtrim.GS$combo_myogenesis,
+OBtrim.GS$Schless_Mouse.BATvWAT.5x
+    )))
+
+
+```
+
+
+
+## What modules are genes of interest in?
+```{r}
+
+GOI <- c("CD36", "UCP2", "CCR1", "CCL2", "CCR2", "CD4", "IL4R", "CD14", "CD163",
+         "MRC1", "CD86", "CD80", "CD68", "TLR2", 'TLR4')
+
+AT.mods %>% filter(HGNCsymbol %in% GOI)
+
+
+SM.MM %>% filter(HGNCsymbol %in% GOI)
+```
+

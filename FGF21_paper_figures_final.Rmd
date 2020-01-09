@@ -1,0 +1,2274 @@
+---
+title: "FGF21 Paper Figures - draft!"
+author: "Sara Murray"
+date: "May 24, 2018"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 2
+  html_document:
+    toc: yes
+    toc_depth: 3
+  word_document:
+    toc: yes
+    toc_depth: '3'
+---
+&nbsp;
+&nbsp;  
+&nbsp;  
+
+
+
+
+
+```{r load packages, results='hide', message=FALSE, echo=FALSE, warning=FALSE} 
+
+# Load go-to libraries
+library(ggplot2); theme_set(theme_bw(14) + 
+                theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+                theme(legend.key = element_blank()))
+library(ggrepel)
+library(RColorBrewer)
+library(data.table)
+library(stringr)
+library(tidyr)
+library(limma)
+library(edgeR)
+library(heatmap.plus)
+library(heatmap3)
+library(knitr)
+# library(rgl)
+#library(pca3d)
+library(heatmap.plus)
+library(heatmap3)
+#library(WGCNA)
+library(gridExtra)
+library(dplyr)
+
+
+
+# Markdown options
+options(stringsAsFactors = FALSE, row.names=FALSE)
+opts_chunk$set(fig.width=8, fig.height=4, cache = TRUE, echo=FALSE, warning=FALSE, message=FALSE, error=FALSE, strip.white = FALSE, fig.align = 'left')
+
+
+
+##### Working from #####
+
+whereIam <- str_split_fixed(getwd(),"PROJECTS",  2)[1] 
+
+# load some generic functions
+source(paste0(whereIam, "R stuff/Functions_general.R"))
+source(paste0(whereIam, "PROJECTS/Genes/phyper GS enrichment.2.R"))
+
+# load functions for this particular script
+source("FGF21 functions.R")
+
+
+
+
+# add a page break with \newpage
+# add a blank line with \newline  or &nbsp; or <br>
+```
+
+
+
+```{r Read in QC'd data and results from analysis script}
+
+# Counts, normalized and voomed counts, annotation
+load("Data/QCd_and_modeled_data_1472.RData")
+
+
+# DEG analysis results
+AT.PostVsPre.I <- read.csv("Results/FINAL/AT.PostVPre.IndivModel.csv")
+
+AT.WashVsPost.I <- read.csv("Results/FINAL/AT.WashVsPre.IndivModel.csv")
+
+AT.WashVsPre.I <- read.csv("Results/FINAL/AT.WashVsPost.IndivModel.PreBase.csv")
+
+Gas.PostVsPre.I <- read.csv("Results/FINAL/Gas.PostVPre.IndivModel.csv")
+
+Gas.WashVsPost.I <- read.csv("Results/FINAL/Gas.WashVsPost.IndivModel.PreBase.csv")
+
+Gas.WashVsPre.I <- read.csv("Results/FINAL/Gas.WashVsPre.IndivModel.csv")
+
+
+# gene expression changes associated with degree of weight loss
+LMgenes.Change.treat   <- read.csv("Results/FINAL/LMresults.AT.gene.treat.BW.TAG.maxCh.csv")
+
+LM.AT.geneCh.predictRegain <- read.csv("Results/FINAL/LMresults.AT.geneCh.predictRegain.csv") 
+
+Gas.LMgenes.Change.treat   <- read.csv("Results/FINAL/LM.Gas.geneCh.BW.TAG.maxCh.csv")
+
+
+
+```
+
+
+
+```{r read in WGCNA results}
+
+# genes in each module
+AT.MM <- read.csv("Results/FINAL/WGCNA/AT.allgenes.Mods.csv")
+AT.mods <- AT.MM[,c(2,4,5,6)]
+
+# # make new number names for modules to use instead of color names
+# AT.mod.names <- AT.MM %>% group_by(moduleColor) %>% 
+#                           count() %>% 
+#                           rename(modSize=n) %>%
+#                           arrange(desc(modSize))
+# AT.mod.names <- AT.mod.names[c(1:13, 15:72,14),]
+# AT.mod.names$modNumber <- c(paste("AT", 1:71, sep="_"), "AT_none")
+# AT.mod.names$Module <- paste0("ME", AT.mod.names$moduleColor)
+# AT.mod.names <- AT.mod.names %>% ungroup()
+
+# write.csv(AT.mod.names, "Results/FINAL/WGCNA/AT.mod.numbers.csv", row.names = FALSE)
+AT.mod.names <- read.csv("Results/FINAL/WGCNA/AT.mod.numbers.csv")
+
+# add numbers to module membership list
+AT.mods <- merge(AT.mod.names, AT.mods, by="moduleColor")
+
+
+Gas.MM <- read.csv("Results/FINAL/WGCNA/Gas.allgenes.Mods.csv")
+Gas.mods <- Gas.MM[,c(2,4,5,6)]
+
+# # make new number names for modules to use instead of color names
+# Gas.mod.names <- Gas.MM %>% group_by(moduleColor) %>% 
+#                           count() %>% 
+#                           rename(modSize=n) %>%
+#                           arrange(desc(modSize))
+# Gas.mod.names$modNumber <- c(paste("SM", 1:40, sep="_"), "SM_none", paste("SM", 41:44, sep="_"))
+# Gas.mod.names$Module <- paste0("ME", Gas.mod.names$moduleColor)
+# Gas.mod.names <- Gas.mod.names %>% ungroup()
+
+
+# write.csv(Gas.mod.names, "Results/FINAL/WGCNA/Gas.mod.numbers.csv", row.names = FALSE)
+Gas.mod.names <- read.csv("Results/FINAL/WGCNA/Gas.mod.numbers.csv")
+
+# add numbers to module membership list
+Gas.mods <- merge(Gas.mod.names, Gas.mods, by="moduleColor")
+
+
+# module expression tables
+
+AT.MEs <- read.csv("Results/FINAL/WGCNA/AT.allgenes.MEexp.csv")
+#change to number names
+AT.MEs <- AT.MEs[,c(1,match(AT.mod.names$Module, colnames(AT.MEs)))]
+names(AT.MEs) <- c("SampleID", AT.mod.names$modNumber)
+
+Musc.MEs <- read.csv("Results/FINAL/WGCNA/Gas.allgenes.MEexp.csv")
+#change to number names
+Musc.MEs <- Musc.MEs[,c(1,match(Gas.mod.names$Module, colnames(Musc.MEs)))]
+names(Musc.MEs) <- c("SampleID", Gas.mod.names$modNumber)
+
+# DE modules (wilcoxon test)
+AT.DEmods.w <- read.csv("Results/FINAL/WGCNA/AT.wilcox.DEmods.csv")
+AT.DEmods.w <- left_join(AT.mod.names[,c("Module", "modNumber")], AT.DEmods.w, by="Module") %>% select(-X)
+
+Gas.DEmods.w <- read.csv("Results/FINAL/WGCNA/Gas.NEW.wilcox.DEmods.csv")
+Gas.DEmods.w <- left_join(Gas.mod.names[,c("Module", "modNumber")], Gas.DEmods.w, by="Module") %>% select(-X)
+
+
+
+
+#module expression changes 
+AT.ME.PostvPre <- read.csv("Results/FINAL/WGCNA/AT.ME.PostvPre.pctCh.csv")
+#change to number names
+AT.ME.PostvPre <- AT.ME.PostvPre[,c(1:40, na.omit(match(AT.mod.names$Module, colnames(AT.ME.PostvPre))))]
+names(AT.ME.PostvPre)[41:111] <- AT.mod.names$modNumber[-72]
+
+                            
+AT.ME.WashvPost <- read.csv("Results/FINAL/WGCNA/AT.ME.WashvPost.pctCh.csv")
+#change to number names
+AT.ME.WashvPost <- AT.ME.WashvPost[,c(1:40, na.omit(match(AT.mod.names$Module, colnames(AT.ME.WashvPost))))]
+names(AT.ME.WashvPost)[41:111] <- AT.mod.names$modNumber[-72]
+
+
+
+```
+
+
+```{r read in pheno data}
+
+
+# by time point
+phenoAnimal <- read.csv("Data/phenoData_fgf21/phenoBasicsByAnimal.csv")
+
+#anno for AT
+annoAT.PD <- annoAT[,1:7]
+annoAT.PD <- merge(annoAT.PD, phenoAnimal, by.x="AnimalID", by.y="AnimalID")
+
+# # anno for Gastroc
+# annoG.PD <- annoGcor[,1:7]
+# annoG.PD <- merge(annoG.PD, phenoAnimal,  by.x="AnimalID", by.y="AnimalID")
+
+
+
+## merge module eigengenes, sample data, and phenodata
+AT.ME.PDanno <- merge(annoAT.PD, AT.MEs[,], by="SampleID")
+
+
+```
+
+
+
+```{r read in gene sets}
+# gene sets used to annotate
+
+OBtrim.GS <- readRDS(paste0(whereIam,"/PROJECTS/Genes/Broad/ObesityTrimmed.GS.rds"))
+
+GObioProc <- readRDS(paste0(whereIam, "PROJECTS/Genes/Broad/GO_bioProcessGS_human.rds"))
+
+Canon <- readRDS(paste0(whereIam, "PROJECTS/Genes/Broad/CanonGS_human.rds"))
+
+
+# filter gene sets using AT counts
+keepRows <- rowSums((lcpm.normCounts.AT) <= 5) <= (ncol(lcpm.normCounts.AT)*.9)
+# table(keepRows) 
+Counts.AT.filt <- lcpm.normCounts.AT[keepRows,] 
+Counts.AT.filt <- merge(MMGtoHGNC[,c("GeneID", "MMG")], Counts.AT.filt, by.x="MMG", by.y="row.names")
+
+OBtrimGS.expr <- filterGeneSets.ensg(Counts.AT.filt, OBtrim.GS, 10)$geneSets.filtered
+GObioProc.expr <- filterGeneSets.ensg(Counts.AT.filt, GObioProc, 10)$geneSets.filtered
+Canon.expr <- filterGeneSets.ensg(Counts.AT.filt, Canon, 10)$geneSets.filtered
+
+```
+
+
+
+
+
+\newpage
+# Figures 
+
+## Figure 1. FGF21 treatment and weight loss associated transcriptional changes in AT.  
+
+### A) Differentially expressed genes in adipose tissue
+```{r, fig.height=1.8, fig.width=6}
+
+# Post vs Pre
+P1 <- ggplot(AT.PostVsPre.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+  geom_point(size=1, alpha=.3)+
+  scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+  xlab("Log2 FC Post vs Pre")+
+  ylab("-Log10 FDR")+
+  ylim(0,8.5)+
+  xlim(-4.5,3)+
+  # ggtitle("Post vs pre")+
+  theme.10+
+  theme(legend.p="none")
+
+# Washout vs Pre
+P2 <- ggplot(AT.WashVsPre.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+  geom_point(size=1, alpha=.3)+
+  scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+  xlab("Log2 FC Washout vs Pre")+
+  ylab("-Log10 FDR")+
+   ylim(0,8.5)+
+  xlim(-4.5,3)+
+  # ggtitle("Washout vs pre")+
+  theme.10+
+  theme(legend.p="none")
+
+# Wash vs Post with Pre as baseline
+P3 <- ggplot(AT.WashVsPost.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+  geom_point(size=1, alpha=.3)+
+  scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+  xlab("Log2 FC Washout vs Post")+
+  ylab("-Log10 FDR")+
+  ylim(0,8.5)+
+  xlim(-4.5,3)+
+  # ggtitle("Washout vs post")+
+  theme.10+
+  theme(legend.p="none")
+
+grid.arrange(P1, P3, P2, ncol=3)
+
+
+```
+
+### B) Treatment vs association with decreased body weight
+```{r 2D volcano plots, fig.height=4, fig.width=6}
+
+
+# # some exploring
+# topBWassoc <- LMgenes.Change.treat %>% filter(BW.Pval < .01)
+# # summary(topBWassoc$BW.Est)
+# topBWassoc <- LMgenes.Change.treat %>% filter(BW.Pval < .01, BW.Est < -.167 | BW.Est > .048)
+# 
+# 
+# # what are the genes that are significantly DE by treatment, AND magnitude is associated with change in BW??
+# topPvP <- AT.PostVsPre.I %>% filter(adj.P.Val <.05, abs(logFC) > .26)  #20% change
+# topBWassoc <- LMgenes.Change.treat %>% filter(BW.Pval < .01)
+# 
+# DEandBWassoc <- LMgenes.Change.treat %>% filter(HGNCsymbol %in% topPvP$HGNCsymbol) %>% arrange(BW.Pval) 
+# 
+# DEandBWassoc$BW.adjPval2 <- p.adjust(DEandBWassoc$BW.Pval, method="BH")
+# top <- DEandBWassoc %>% filter(BW.adjPval < .25) %>% select(HGNCsymbol, BW.Est, BW.adjPval, BW.adjPval2)
+# 
+# # sum(topPvP$logFC >0)
+# # sum(topPvP$logFC <0)
+# # sum(DEandBWassoc$BW.adjPval < .25 & DEandBWassoc$BW.Est>0)
+# # sum(DEandBWassoc$BW.adjPval < .25 & DEandBWassoc$BW.Est<0)
+# 
+# # write.csv(DEandBWassoc, "Results/DEandBWassoc.csv")
+# 
+# #wash vs post
+# topPvP <- AT.WashVsPost.I %>% filter(adj.P.Val <.05, abs(logFC) > .26)  #20% change
+# # topBWassoc <- LMgenes.Ch.regain %>% filter(BW.Pval < .01)
+# DEandBWassoc <- LMgenes.Ch.regain %>% filter(HGNCsymbol %in% topPvP$HGNCsymbol) %>% arrange(BW.Pval) 
+# DEandBWassoc$BW.adjPval2 <- p.adjust(DEandBWassoc$BW.Pval, method="BH")
+# top <- DEandBWassoc %>% filter(BW.adjPval < .25) %>% select(HGNCsymbol, BW.Est, BW.adjPval, BW.adjPval2)
+
+# sum(topPvP$logFC >0)
+# sum(topPvP$logFC <0)
+# sum(DEandBWassoc$BW.adjPval2 < .25 & DEandBWassoc$BW.Est> 0 )
+# sum(DEandBWassoc$BW.adjPval2 <.25 &  DEandBWassoc$BW.Est<0)
+# sum(DEandBWassoc$BW.adjPval < .25 & DEandBWassoc$BW.Est> 0 )
+# sum(DEandBWassoc$BW.adjPval <.25 &  DEandBWassoc$BW.Est<0)
+
+
+
+
+
+# plot pre vs post DE genes against BW associated genes
+DEandBW <- AT.PostVsPre.I[,c(3:6, 8:9)] %>% left_join(LMgenes.Change.treat[ c(3,14:16)], by="GeneID")
+DEandBW$Significance <- ifelse(DEandBW$adj.P.Val < .25 & DEandBW$BW.adjPval < .25, "Treatz and BW", 
+        ifelse(DEandBW$adj.P.Val < .25 & DEandBW$BW.adjPval > .25, "Treat only",  "NS"))
+
+# label genes of interest on plot
+toLabel <-c("UCP1", "LIPA", "ANGPTL8", "LPL", "NRG4", 'FAM19A4', "IL10", "LEP", "CD14", "CD163", "ELOVL3", "AGPAT2", "PPARG", "MAOA", "UCP2", "CD4", "CCR1", "P2RY1", "CD36")
+toLabel2 <- DEandBW[ (DEandBW$logFC<(-1.8) & DEandBW$BW.Est>.21) | 
+                       DEandBW$logFC<(-1.8) | (DEandBW$BW.Est >.21 & !DEandBW$Significance =="NS")  |
+                       (DEandBW$logFC>.8 & DEandBW$BW.Est<(-.2)) |
+                       (DEandBW$logFC <(-1) & DEandBW$BW.Est < (-.2)) |
+                       DEandBW$logFC>1.3 , "HGNCsymbol"]
+# toLabel <- c(toLabel, toLabel2)
+# make most of the labels blank so that all points are labelled and repel the visible labels.
+DEandBW$Label <- DEandBW$HGNCsymbol
+DEandBW$Label[!DEandBW$Label %in% toLabel] <- ""
+
+# highlight those genes in a different color
+DEandBW$Significance2 <- DEandBW$Significance
+DEandBW[DEandBW$HGNCsymbol %in% toLabel, "Significance2"] <- "zHighlight"
+DEandBW <- DEandBW %>% arrange(Significance2)
+
+# write.csv(DEandBW, "Results/DEG Correct Names2/DEG.treatmentAndPctChBW.csv", row.names = FALSE)
+
+ggplot(DEandBW, aes(x=logFC, y=BW.Est))+
+  geom_point(aes(color=Significance2, alpha=Significance2))+
+  scale_color_manual(values=c("grey50", "deepskyblue3","red3", "black"), labels=c("NS", "Treat only", "Treat and BW", "Select DE genes"))+
+  scale_alpha_manual(values=c(.6,.6,.6,1))+
+  # scale_fill_manual(values=c("white", "deepskyblue4","red4" ))
+  ylim(-.5,.5)+
+  xlim(-3,3)+
+  geom_hline(yintercept = 0, linetype="dashed")+
+  geom_vline(xintercept = 0, linetype="dashed")+
+  geom_text_repel(data=DEandBW, aes(label=Label), 
+                  colour="grey30", size=2, #fontface="bold",
+                  point.padding=1, box.padding = .5, segment.alpha = .6)+
+  ylab("Estimated association with change in body weight")+
+  xlab("Log2 fold change Post-treatment/Pre-treatment")+
+  # ggtitle("B")+
+  theme.10+
+  theme(legend.position = "right")
+
+
+
+# # try moving labels toward outside of plot
+# ggplot(DEandBW, aes(x=logFC, y=BW.Est))+
+#   geom_point(aes(color=Significance2, alpha=Significance2))+
+#   scale_color_manual(values=c("grey50", "deepskyblue3","red3", "black"), labels=c("NS", "Treat only", "Treat and BW", "Select DE genes"))+
+#   scale_alpha_manual(values=c(.6,.6,.6,1))+
+#   # scale_fill_manual(values=c("white", "deepskyblue4","red4" ))
+#   # ylim(-.5,.5)+
+#   # xlim(-3,3)+
+#   geom_hline(yintercept = 0, linetype="dashed")+
+#   geom_vline(xintercept = 0, linetype="dashed")+
+#   geom_text_repel(data=DEandBW[DEandBW$HGNCsymbol %in% toLabel,], aes(label=HGNCsymbol), 
+#                   colour="black", size=3, fontface="bold")+
+#   ylab("Estimated association with change in body weight")+
+#   xlab("Log2 fold change Post-treatment/Pre-treatment")+
+#   # ggtitle("B")+
+#   theme.10+
+#   theme(legend.position = "right")  
+    
+
+
+```
+
+
+
+
+
+
+
+
+<!-- ###  Heatmap of genes of interest -->
+
+```{r heatmap of GOIs sig genes only, fig.height=8}
+
+# genes to include  (essentially all the genes plotted individually below)
+Imm1 <- c("IL5", "IL33", "TSLP", "IL4R", "GATA3", "STAT6", "TGFB1", "IL10", "CCR1", "CCR2",  "CD4")
+
+Imm2 <- c("CD14", "CD68", "CD36", "CD80", "BTK", "IRF5", "CCL2", "INHBA", "HIF1A", "TLR2", "TLR4", "TNF", "CD86", "CD163",  "MRC1", "PPARG")
+
+thermoBrownSig <- c("ADIPOR2", "AGPAT2", "LIPA", "TMEM26", "KLHL13", "LEP",  "KDM3A", "PPARG", "ELOVL3", "INHBA", "KCNAB2", "MRAP",  "SLC2A4", "UCP1", "UCP2" )
+
+lipogen <- c("SLC25A10", "TKT", "MECR", "RETSAT","DGAT2","ACAD9", "MGST1","ACACA","ACSS2","CDKN2C","THRSP","SLC25A1","FASN","NRG4")
+
+neuro <- c("ELMOD3","FAM19A4","GABRB1","SIGMAR1","P2RY1","LRIG1","ACAD9","MAOA","PTGER3","UCHL1","UNC13B","PARK2","KPTN")
+
+
+# arrange anno in desired order ( will match counts to this order in grabGOIcounts function)
+heatanno = annoAT.PD
+heatanno$Treatment <- factor(heatanno$Treatment, levels=c("FGF21.Pre", "FGF21.Post", "FGF21.Wash"))
+heatanno <- heatanno %>% arrange(Treatment, desc(BWpctChange_maxCh))
+
+
+# make color bars
+TPcolor <- ifelse(heatanno$Treatment=="FGF21.Pre", "orangered",
+                  ifelse(heatanno$Treatment=="FGF21.Post", "deepskyblue4",
+                         ifelse(heatanno$Treatment=="FGF21.Wash", "olivedrab", NA)))
+
+# sexColor <- ifelse(heatanno$Sex =="female", "salmon",
+#                   ifelse(heatanno$Sex==  "male", "turquoise", NA))
+
+sampColor <- as.matrix(data.frame(TP1 = TPcolor, TP2 = TPcolor ))
+
+# grab counts 
+Imm1counts <- grabGOIcounts(counts=voomCounts.AT, GOI=Imm1, anno=heatanno)
+
+# heatmap.plus(as.matrix(Imm1counts), Colv = NA,  ColSideColors = sampColor,
+             # scale="row", col=rev(brewer.pal(n=10, name="RdBu")))
+
+
+
+Imm2counts <- grabGOIcounts(counts=voomCounts.AT, GOI=Imm2, anno=heatanno)
+
+# heatmap.plus(as.matrix(Imm2counts), Colv = NA,  ColSideColors = sampColor,
+#              scale="row", col=rev(brewer.pal(n=10, name="RdBu")))
+
+
+Thermocounts <- grabGOIcounts(counts=voomCounts.AT, GOI=thermoBrownSig, anno=heatanno)
+
+# heatmap.plus(as.matrix(Thermocounts), Colv = NA,  ColSideColors = sampColor,
+#              scale="row", col=rev(brewer.pal(n=10, name="RdBu")))
+
+
+lipogencounts <- grabGOIcounts(counts=voomCounts.AT, GOI=lipogen, anno=heatanno)
+
+# heatmap.plus(as.matrix(lipogencounts), Colv = NA,  ColSideColors = sampColor,
+#              scale="row", col=rev(brewer.pal(n=10, name="RdBu")))
+
+
+neurocounts <- grabGOIcounts(counts=voomCounts.AT, GOI=neuro, anno=heatanno)
+
+# heatmap.plus(as.matrix(neurocounts), Colv = NA,  ColSideColors = sampColor,
+#              scale="row", col=rev(brewer.pal(n=10, name="RdBu")))
+
+
+### all together ####
+
+allGOI <- grabGOIcounts(counts=voomCounts.AT, GOI=unique(c(neuro, Imm1, Imm2, lipogen, thermoBrownSig)), anno=heatanno)
+
+# heatmap.plus(as.matrix(allGOI), Colv = NA,  ColSideColors = sampColor,
+#              scale="none", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)])
+
+# try removing rowmeans (kind of like scaling relative gene expression)
+allGOI.scale  <- allGOI - rowMeans(allGOI)
+
+# heatmap.plus(as.matrix(allGOI.scale), Colv = NA,  ColSideColors = sampColor,
+#              scale="row", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)])
+```
+
+
+```{r extended heat maps}
+
+neuron <- unique(c("SYNM", "GABRB1", "CAMK2A", "PARK2", "RIMS4", "UCHL1", "DMD", "LDLRAP1", "SYNPO", "CAP2", "SYT3", "SIGMAR1", "ACAD9", "MAGI2", "ELMOD3", "COBL", "SYPL2", "SYN1", "DHODH", "GCHFR", "PICK1", "OPN1SW", "CTTN", "LRRC7", "SCNBA", "PICK1", "REEP6", "KPTN", "CHRND", "GSG1L", "SYNPO", "FGFR2", "CAP2", "SNTA1", "WWC1", "FAM19A4"))
+
+norep <- c("MAOA","RAB3A","RIMS1","SLC18A2","SLC22A2","SNAP25","STX1A","STXBP1","SYT1","VAMP2","ADRA2A","ADRA2B","ADRA2C","AGT","AGTR2","CRH","CRHR2","FFAR3","HRH3","KCNB1","OXT","OXTR","P2RY1","P2RY12","PTGER3","PTGS1", "RIMS4", "FAM19A4")
+
+neuroT <- c("ABAT","ALDH5A1","CHAT","DNAJC5","GAD1","GAD2","GLS","GLS2","HSPA8","MAOA","RAB3A","RIMS1","SLC17A7","SLC18A2","SLC18A3",'SLC1A1',"SLC1A6","SLC1A7","SLC22A2","SLC32A1","SLC38A2","SLC5A7","SLC6A1","SLC6A11","SLC6A12","SNAP25","STX1A","STXBP1","SYN1","SYN2","SYN3","SYT1","UNC13B","VAMP2"
+)
+
+Innerv <- c("COL25A1","FBXO45","GABRA5","GABRB2","GABRB3","ISL1","LRIG1","LRIG2","NPTX1","NRP1","NTF4","NTRK1","POU4F1","PRKCG","RET","RNF165","SEMA3A","SERPINE2","SLITRK6","SULF1","SULF2","UNC13A","UNC13B")
+
+Axon <- c("AMIGO1","APOE","BAI1","BAIAP2","CDK5R1","CNTN4","CYFIP1","DPYSL5","FEZ1","FEZ2","GLI2","KAL1","KLK8","LRRC4C","MAPT","NRP1","NRP2","NRXN1","NRXN3","NTNG1","NTNG2","OPHN1","OTX2",
+          "PARD3","PARD6B","PAX2","POU4F1","ROBO1","ROBO2","RTN4","RTN4RL1",'RTN4RL2',"S100B","SEMA3B",
+          "SEMA4F","SHH","SIAH1","SLIT1","SLIT2","SPON2","THY1","UBB","UNC5C")
+
+neuroAll <- unique(c(neuron, Innerv, Axon, norep, neuroT))
+
+neuroAllc <- grabGOIcounts(counts=voomCounts.AT, GOI=neuroAll, anno=heatanno)
+
+# heatmap.plus(as.matrix(neuroAllc), Colv = NA,  ColSideColors = sampColor,
+#              scale="row", col=rev(brewer.pal(n=10, name="RdBu")))
+
+
+
+```
+
+
+
+
+
+
+
+\newpage
+
+## Figure 2. Tissue-specific, data-driven gene modules  
+
+These will be network plots or heat maps that show the relatedness (correlation) of gene modules to each other and each module's association with decreased body weight.  
+
+### A) Adipose tissue modules  
+
+BUKT is making network plots !  The final plot will be similar to below, except the association of each module with change in body weight will be depicted in the plot, perhaps by node color.  We may also emphasize the grey60 and turquoise modules, as those are the most important/most discussed in the paper.  
+
+```{r, out.width = "500px"}
+knitr::include_graphics("PAPER/Paper plots/AT network plot2.png")
+```
+
+
+ 
+
+
+
+
+
+
+
+
+
+<!-- \newpage   -->
+<!-- ## Figure 3. FGF21-induced weight loss changes the immune profile of adipose tissue   -->
+
+<!-- ### A) Expression of immune related modules -->
+<!-- ```{r inflamm modules, fig.height=1.75, fig.width=6} -->
+
+<!-- inflamMods <- c("MEcoral", "MEdarkred", "MEturquoise") -->
+<!-- inflamModsExpr <- AT.MEs %>% select(SampleID, inflamMods) -->
+<!-- P <- plotModExpr(MEs=inflamModsExpr, anno=annoAT[,-c(14:46)], ncol=4, -->
+<!--             title=NULL) -->
+<!-- P + theme.10+ theme(axis.ticks = element_blank(), axis.text.x = element_blank(), -->
+<!--           legend.position = "right")+ ylab("Module expression")+ -->
+<!--   ggtitle("A") -->
+
+
+<!-- # P <- plotModPhenoCor.pairedxTime(MEs = AT.MEs, Mods = inflamMods, pheno="BW.con", -->
+<!-- #                             pointColor="AnimalID", ncol=4, -->
+<!-- #                             anno=AT.PD.T %>% filter(Treatment %in% c("FGF21.Pre", "FGF21.Post")),  -->
+<!-- #                             xlab="Body Weight", title=NULL) -->
+<!-- # P + scale_fill_manual(values=c("orangered", "deepskyblue4"), labels=c("Pre", "Post"))+ -->
+<!-- #   theme(axis.ticks = element_blank(), axis.text.x = element_blank(), -->
+<!-- #           legend.position = "right") +xlab("Body weight Kg") +ylab("Module expression") -->
+
+
+<!-- # P <- plotModPhenoCor.pairedxTime(MEs = AT.MEs, Mods = inflamMods, pheno="BW.con", -->
+<!-- #                             pointColor="AnimalID", ncol=4, -->
+<!-- #                             anno=AT.PD.T %>% filter(Treatment %in% c("FGF21.Wash", "FGF21.Post")),  -->
+<!-- #                             xlab="Body Weight", title=NULL) -->
+<!-- # P + scale_fill_manual(values=c( "deepskyblue4", "olivedrab"), labels=c("Post", "Washout"))+ -->
+<!-- #   theme(axis.ticks = element_blank(), axis.text.x = element_blank(), -->
+<!-- #           legend.position = "right")+xlab("Body weight Kg") +ylab("Module expression") -->
+<!-- #  -->
+<!-- ``` -->
+<!-- ### B) Association of immune modules with decreased body weight -->
+<!-- ```{r inflamm modules2, fig.height=2, fig.width=5} -->
+
+<!-- P <- plotChangeModPhenoCor(ME.change=AT.ME.PostvPre, Mods=inflamMods, pheno="BWpctChange_Wash.w2",  ncol=5, title="B") -->
+<!-- P + theme.10+xlab("Max % change in body weight") + scale_color_manual(values="navyblue") -->
+
+<!-- # P <- plotChangeModPhenoCor(ME.change=AT.ME.PostvPre, Mods=inflamMods, pheno="TAGpctCh_maxCh",  ncol=5, title="Change in module expression and pheno variable") -->
+<!-- # P + xlab("Max % change in TG levels") + scale_color_manual(values="navyblue") -->
+
+<!-- ``` -->
+
+
+
+```{r iNKT markers, fig.height=6}
+
+### C) Immune cell type markers
+
+# Biocarta NKT pathway
+NKT <- c("CCL3","CCL4","CCR1","CCR2","CCR3","CCR4","CCR5","CCR7","CD28","CD4","CD40LG","CSF2","CXCR3","CXCR4","IFNG","IFNGR1","IFNGR2","IL12A","IL12B","IL12RB1","IL12RB2","IL18R1","IL2","IL4","IL4R","IL5","TGFB1","TGFB2","TGFB3")
+
+# P <- plotGOI.paired.HGNC(NKT, voomCounts.AT, anno=annoAT, title="Expression of NKT genes", ncol=5)
+# P + ggtitle("C. Expression of NKT cell marker genes") +
+#   theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = "bottom")
+# 
+# P <- plotGOIchVphenoCh(GOI=NKT, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=5, title="D. Change in NKT genes vs change in body weight")
+# P + xlab("Max % change in body weight")
+
+# from Niemeyer et al 2008, sorted mouse cells: NKT cells were sorted as CD3+ NK1·1+ CD1d/αGalCer tetramer+ and Mac-1– B220– CD11c– CD8–.
+
+NKTdown <- c("ITGA4", "CASP4", "VIM")  # compared to NK, and CD4 T cells
+#ITGA4 = CD49d, NK marker
+
+NKTup <- c("IL12RB1", "CXCR3", "VLA4", "BLK", "CCR3", "IL17RB", "RORA", "DAO", 'SNAI3', "FFAR2", "DUSP6", "AIM1L", "CRYBG2", "TRGC1", "TRGV4")
+
+# plotGOI.paired.HGNC(NKTdown, voomCounts.AT, anno=annoAT, title="Expression of non-NKT genes", ncol=4)
+# 
+# plotGOIchVphenoCh(GOI=NKTdown, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=7, title="Change in non-NKT genes vs change in body weight")
+# 
+# plotGOI.paired.HGNC(NKTup, voomCounts.AT, anno=annoAT, title="Expression of NKT genes", ncol=5)
+# 
+# plotGOIchVphenoCh(GOI=NKTup, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=5, title="Change in NKT genes vs change in body weight")
+
+# add to bindea list
+Bindea <- read.csv(paste0(whereIam, "PROJECTS/Genes/BindeaCellSignatures.csv"))
+Bindea[513:515,1] <- NKTdown
+Bindea[513:515,2] <- "NKTdown"
+Bindea[516:530,1] <- NKTup
+Bindea[516:530,2] <- "NKTup"
+Bindea[531:559,1] <- NKT
+Bindea[531:559,2] <- "NKT"
+```
+
+
+
+```{r cell  type markers}
+
+# !!! this section needs help- how to separate markers that are assigned for multiple cell types?? !!!
+
+anno <- AT.ME.PDanno[,c(1:5,21,26,30,40,43, 49:119)]
+counts <- voomCounts.AT
+counts <- merge(MMGtoHGNC[,c(3:4)], counts, by.x="MMG", by.y="row.names")
+BindCounts <- na.omit(counts[match(Bindea$HGNCsym, counts$HGNCsymbol),])
+BindCounts <- BindCounts[,-1]
+  sampleID <- colnames(BindCounts)[-1]
+  BindCounts <- transpose(BindCounts)
+  colnames(BindCounts) <- BindCounts[1,]
+  BindCounts <- BindCounts[-1,,drop=FALSE]
+  BindCounts$SampleID <- sampleID
+  L.Bind <- gather(BindCounts, "Gene", "Counts", 1:342)
+  L.Bind <- merge(L.Bind, Bindea, by.x="Gene", by.y="HGNCsym")
+  L.Bind$Counts <- as.numeric(L.Bind$Counts)
+  L.Bind$Gene <- factor(L.Bind$Gene, levels=c(unique(L.Bind$Gene)))
+  L.Bind <- L.Bind[,-c(2:9)]
+
+medCelltype.AT <- L.Bind %>% group_by(SampleID, CellType ) %>% summarise(median=median(Counts), mean=mean(Counts))
+medCelltype.AT <- merge(medCelltype.AT, anno, by="SampleID")
+names(medCelltype.AT) <- gsub(" ", "", names(medCelltype.AT))
+medCelltype.AT$Treatment <- factor(medCelltype.AT$Treatment, levels=c("FGF21.Pre", "FGF21.Post", "FGF21.Wash"))
+
+
+```
+
+
+
+
+```{r}
+
+### C) Change in immune cell populations in adipose tissue
+
+# medCelltype.AT %>%
+#   #filter(Treatment=="FGF21.Pre") %>%
+#   #filter(CellType %in% c("Macrophages", "NK", "Eosinophils", "aDC", "CTL", "Th1", "Th2", "Treg")) %>%
+# ggplot(aes(x=Treatment, y=median))+
+#   geom_line(aes(group=AnimalID), color="grey30")+
+#     #geom_boxplot(outlier.color=NA, aes(color=Treatment))+
+#     geom_point(size=3, shape=21, aes(fill=Sex))+
+#     stat_summary(fun.y="mean", geom="point", shape=23, size=2, fill="white")+
+#     facet_wrap(~CellType, ncol=9, scales="free")+
+#     ylab("Median cell type marker expression")+
+#     smallFacetLabels+
+#     theme(legend.position = "bottom", axis.text.x = element_text(angle=20, hjust=1, vjust=1))
+# 
+# 
+# # BW% change in pre time point == Th17 in pre
+# medCelltype.AT %>% filter(Treatment=="FGF21.Post") %>%
+#   #filter(CellType %in% c("Macrophages", "NK", "Eosinophils", "aDC", "CTL", "Th1", "Th2", "Treg", "Tgd", "Th17")) %>%
+# ggplot(aes(x=BWpctChange_Wash.w2, y=mean, color=Sex))+
+#   geom_point(size=3)+
+#     stat_smooth(method="lm", se=FALSE)+
+#     facet_wrap(~CellType, ncol=6,scales="free")+
+#     ylab("Median cell type marker expression")+
+#     smallFacetLabels+
+#     theme(legend.position = "bottom", axis.text.x = element_text(angle=20, hjust=1, vjust=1))
+# 
+
+
+
+# Mast <- Bindea %>% filter(CellType=="Mastcells")
+# P <- plotGOI.paired.HGNC(GOI=Mast$HGNCsym, counts=voomCounts.AT,
+#                                 by="Treatment", anno=annoAT, ncol=4,
+#                                 title="C. Expression of Mast cell marker genes")
+# P  + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = "bottom")
+# 
+# MastSig <- LMgenes.Change.treat %>% filter(HGNCsymbol %in% Mast$HGNCsym) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+#  
+# 
+# P <- plotGOIchVphenoCh(GOI=MastSig$HGNCsymbol[1:10], counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=4, title="D. Change in Mast cell markers vs change in body weight")
+# P + xlab("Max % change in body weight")
+# 
+# 
+# Mast2 <- c("CCL2", "CMA1", "CMA2", "CREB3L1", "EDNRA", "GNAI1", "HS6ST2", "KCNE3", "MAOB", "MCPT4", "MEIS2", "MRGPRA4", "MRGPRB1", "MRGPRB1", "MRGPRX2", "OLFR920", "PLAU", "RAB27B", "TPH1", "TPSAB1", "TPSB2")
+# 
+# P <- plotGOI.paired.HGNC(GOI=Mast2, counts=voomCounts.AT,
+#                                 by="Treatment", anno=annoAT, ncol=4,
+#                                 title="C. Expression of Mast cell marker genes")
+# P  + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = "bottom")
+# 
+# MastSig <- LMgenes.Change.treat %>% filter(HGNCsymbol %in% Mast2) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+#  
+# 
+# P <- plotGOIchVphenoCh(GOI=Mast2, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=4, title="D. Change in Mast cell markers vs change in body weight")
+# P + xlab("Max % change in body weight")
+```
+
+
+```{r immune cell marker genes, fig.height=3.5}
+# check out genes in the eosinophil, macrophage, catecholamine beigeing cycle
+# papers: Hui et al 2015 adiponectin cold-induced browing via M2 macrophages
+      #Wui et al 2014 eosinophils and type 2 macrophages = beige fat
+
+
+# immBeige <- c("IL4", "IL13", "IL33", "CCL11", "IL4R", "GATA3","STAT6", "CCR2", "TH", "METRNL", "ADIPOQ" )
+# 
+# # cant see IL4 or IL13 cytokines...  look for signaling pathways?
+# IL4 <- c("IL4R", "GATA3", "STAT6")
+
+# 
+# 
+# 
+# plotGOI.paired.HGNC(immBeige, voomCounts.AT, anno=annoAT, title="Expression of immune beiging pathway genes", ncol=4)
+# 
+# plotGOIchVphenoCh(GOI=immBeige, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=4, title="Change in immune beiging pathway genes vs change in body weight")
+# # IL4R and CCR2 go in right direction, GATA3 and STAT6 no correlation
+# 
+ beige <- c("UCP1", "CIDEA", "COX7A1", "TBX1", "TMEM26", "TNFRSF9", "FGF21", "P2RX5", "PAT2", "CAR4", "CITED1", "PPARGC1A", "KLHL13", "NR2F6",  "CPT1B", "CIDEB", "COX8A")
+# CD137=TNFRSF9
+# CIDEA not aligned, but CIDEB present
+# COX8B not aligned, but a and c present
+# TBX1 not aligned
+# P2RX5 not aligned
+# PAT2 doesn't exist in macaque?
+# plotGOI.paired.HGNC(beige, voomCounts.AT, anno=annoAT, title="Expression of fat browning genes", ncol=4)
+
+# plotGOIchVphenoCh(GOI=beige, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=4, title="Change in immune beiging pathway genes vs change in body weight")
+# 
+
+# LMgenes.Change.treat %>% filter(HGNCsymbol %in% beige) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+
+
+# Eosin <- Bindea %>% filter(CellType=="Eosinophils")
+# Eosin <- c(Eosin$HGNCsym, "CCL11", "IL4R", "SIGLEC8", "IL5", "IL9", "IL13" )
+# 
+# plotGOI.paired.HGNC(Eosin, voomCounts.AT, anno=annoAT, title="Expression of Eosinophil genes", ncol=5)
+# 
+# plotGOIchVphenoCh(GOI=Eosin, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=7, title="Change in eosinophil genes vs change in body weight")
+# 
+# # # where do eosin genes fall in pre vs post?
+# # AT.PostVsPre.I %>% filter(HGNCsymbol %in% Eosin) %>% select(HGNCsymbol, logFC, P.Value, adj.P.Val)
+# 
+# 
+# ILC2 <- c("GATA3", "IL33", "IL25", "TSLP", "IL5", "IL13", "IL7R", "SCA1", "IL1LR1", "IL19R", "IL17RB", "RXRG", "PPARG", "MC5R", "DGAT2", "ALOX5", "HES1", "PDCD1", "CCL1", "LRRC52", 'SLC7A8', "CCR8", "PTGIR", "HS3ST1", "CCR4", "STXBP6", "NEB", "TPH1", "CALCA", "IL6", "PTPN13", "LPCAT2", "AR", "ACER2", "CYBB")
+# 
+# plotGOI.paired.HGNC(ILC2, voomCounts.AT, anno=annoAT, title="Expression of ILC2 genes", ncol=5)
+# 
+# plotGOIchVphenoCh(GOI=ILC2, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=5, title="Change in ILC2 genes vs change in body weight")
+# 
+# 
+# Macs <- c("CD14",  "CD36", "CD163", "CD68", "CD84", "CD33", "CCL2", "LY6C", "IL4R",  "CLEC10A", 'MRC1', "ARG1", "RBPJ", "MAF")
+# plotGOI.paired.HGNC(Macs, voomCounts.AT, anno=annoAT, ncol=4,
+#                     title="Expression of macrophage genes" )
+# plotGOIchVphenoCh(GOI=Macs, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=4, title="Change in macrophage genes vs change in body weight")
+# #CD36 goes in opposite direction, CD33, CLEC10A, CCL2 look nonsig.  CD36 is oxidized lipid scavenger receptor; contributes to AT inflammation.
+# # CD14+CD16+CD36+ macs are inflammatory and higher in obese patients;
+# # CD14+CD16-CD163+ macs are anti-inflamm and higher in low BMI people
+#   # !! No CD16 (FCGR3A,B) in this data set!!
+# 
+# # AT.PostVsPre.I %>% filter(HGNCsymbol %in% Macs) %>% select(HGNCsymbol, logFC, P.Value, adj.P.Val)
+# 
+# 
+# # genes involved in macrophage uptake of lipids and lysosome function ("ATP6V0D2", "LIPA", "CTSK")
+# uptake <- c("CD14", "CD36", "SCARB1", "MSR1", "PLIN2", "SRA1", "SCARF1", "OLR1", "PPARG", "ATGL", "PNPLA2", "NTN1", "LSR",  "ATP6V0D2", "LIPA", "CTSK")
+# plotGOI.paired.HGNC(GOI=uptake, counts=voomCounts.AT,
+#                                 by="Treatment", anno=annoAT, ncol=5,
+#                                 title="Expression of lipid scavenger/uptake genes")
+# plotGOIchVphenoCh(GOI=uptake, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=4, title="Change in TG synthesis genes vs change in body weight")
+# 
+# ## put in official gene set on lysosome function?
+# 
+M1 <- c("IFNG", "CSF2", "CD86", "CD80", "CD68", "IL1R1", "TLR2", "TLR4", "NOS2", "SOCS3", "IL6", "IL1B", "TNF", "IL12A", "IL12B", "IL23A", "CXCL10", "CCL11", "CCL5", "CCL8", "CCL9", "CCL2", "CCL3", "CCL4")
+# 
+# plotGOI.paired.HGNC(GOI=M1, counts=voomCounts.AT,
+#                                 by="Treatment", anno=annoAT, ncol=5,
+#                                 title="Expression of M1 macrophage genes")
+# plotGOIchVphenoCh(GOI=M1, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=7, title="Change in TG synthesis genes vs change in body weight")
+# # increases in CD86, CD80, CD68, TLR2,4, TNF, are assoc with greater BW loss!
+# 
+# 
+M2 <- c("CD163", "CD86", "MRC1", "CD200R1", "TGM2", "IL10", "IL12", "TNF", "TGFB1", "IL1RN", "CCL17", "CCL22", "CCL24", "IL6","VEGFA", "ADA", "LIF")
+# 
+# plotGOI.paired.HGNC(GOI=M2, counts=voomCounts.AT,
+#                                 by="Treatment", anno=annoAT, ncol=5,
+#                                 title="Expression of M2 macrophage genes")
+# plotGOIchVphenoCh(GOI=M2, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=7, title="Change in TG synthesis genes vs change in body weight")
+# # CD163, CD86, MRC1, CD200R1, IL10, TNF, TGFB... kind of TGM2, IL1RN
+# # MRC1 = CD206
+# 
+# 
+# ## now just the signalling molecules
+ M1.s <- c("STAT1", "IRF5", "BTK", "P2Y2R", "INHBA", "SOCS3", "HIF1A", "TNF", "COX2", "CCL5", "NOS2")
+# plotGOI.paired.HGNC(GOI=M1.s, counts=voomCounts.AT,
+#                                 by="Treatment", anno=annoAT, ncol=5,
+#                                 title="Expression of M1 signalling genes")
+# plotGOIchVphenoCh(GOI=M1.s, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=7, title="Change in M1 signalling genes vs change in body weight")
+# #increased STAT1, IRF5, BTK, HIF1A, TNF assoc with increased BW decrease, INHBA is opposite 
+# 
+# 
+M2.s <- c("STAT6", "IRF4", "KLF4", "PPARG", "HIF2A", "IL21", "BMP7", "FABP4", "LXRA", "ARG1", "MRC1", "FIZZ1")
+# plotGOI.paired.HGNC(GOI=M2.s, counts=voomCounts.AT,
+#                                 by="Treatment", anno=annoAT, ncol=5,
+#                                 title="Expression of M2 genes")
+# plotGOIchVphenoCh(GOI=M2.s, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=4, title="Change in TG synthesis genes vs change in body weight")
+# # decreased PPARG assoc with greater decrease in BW
+
+allMacSig <- LMgenes.Change.treat %>% filter(HGNCsymbol %in% c(M1, M2, M1.s, M2.s)) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+ Imm1 <- c("IL5", "IL33", "TSLP", "IL4R", "GATA3", "STAT6", "TGFB1", "IL10", "CCR1", "CCR2",  "CD4")
+Imm2 <- c("CD14", "CD68", "CD36", "CD80", "BTK", "IRF5", "CCL2", "INHBA", "HIF1A", "TLR2", "TLR4", "TNF", "CD86", "CD163",  "MRC1", "PPARG")
+```
+
+<!-- ### C) Heatmap -->
+```{r, fig.height=4, fig.width=6}
+# heatmap with all imm genes together
+Immcounts <- grabGOIcounts(counts=voomCounts.AT, GOI=c(Imm1, Imm2), anno=heatanno)
+
+Immcounts.scale  <- Immcounts - rowMeans(Immcounts)
+
+# heatmap.plus(as.matrix(Immcounts.scale), Colv = NA,  ColSideColors = sampColor,
+             # scale="row", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)])
+```
+
+
+
+```{r Expression of NKT markers and type 2 signalling genes }
+# plot just those genes mentioned in paper
+# P <- plotGOI.paired.HGNC(GOI=Imm1, counts=voomCounts.AT,
+#                                 by="Treatment", anno=annoAT, ncol=6,
+#                                 title="C. Expression of NKT markers and type 2 signalling genes")
+# P  + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = c(.93,.15))
+# 
+# Imm1Sig2 <- LMgenes.Change.treat %>% filter(HGNCsymbol %in% Imm1) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+#  
+
+# P <- plotGOIchVphenoCh(GOI=Imm1, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=6, title="D. Change in type 2 and NKT genes vs change in body weight")
+# P + xlab("Max % change in body weight")
+```
+
+```{r Expression of macrophage genes , fig.height=4.5}
+
+# P <- plotGOI.paired.HGNC(GOI=Imm2, counts=voomCounts.AT,
+#                                 by="Treatment", anno=annoAT, ncol=6,
+#                                 title="E. Expression of macrophage genes")
+# P  + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = c(.9,.1))
+
+Imm2Sig2 <- LMgenes.Change.treat %>% filter(HGNCsymbol %in% Imm2) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+ 
+
+# P <- plotGOIchVphenoCh(GOI=Imm2, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=6, title="F. Change in macrophage genes vs change in body weight")
+# P + xlab("Max % change in body weight")
+
+```
+
+```{r}
+### E) No evidence of increased lipid uptake by phagocytic cells
+
+# now plot genes that are involved in uptake of lipids by macrophages
+# uptake <- c("CD14", "CD36", "SCARB1", "MSR1", "SRA1", "SCARF1", "OLR1", "PPARG", "ATGL", "PNPLA2", "NTN1", "LSR")
+# #NTN1 promotes retention of ATMs
+# 
+# # # by treatment
+# plotGOI.paired.HGNC(uptake, voomCounts.AT, anno=annoAT, title="Coral module genes involved in inflammatory pathways")
+
+# # correlation with pheno
+# plotGOI.phenCor.HGNC(uptake, counts=voomCounts.AT,
+#                      pheno="TAGpctCh_maxCh", anno=annoAT.PD %>% filter(Treatment=="FGF21.Pre"), 
+#                      color="Sex", title="Genes involved in macrophage uptake of lipids")
+
+
+```
+
+
+\newpage
+## Figure 3. FGF21-induced weight loss modulates adipogenesis, fat browning, thermogenesis, lipid storage, and inflammatory pathways.
+
+### A and B) Gene modules of interest
+
+```{r browning, fig.height=3.7}
+
+#annotation: grey60 = mix of adipogen, FA metab; honeydew = adipogenesis down 1e-4; salmon= adipogen 4e-6, cholesterol 7e-5; steelblue= estrogen 8e-8, adipogen down 6e7.  brown4 = mix of stuff, schlessBvW1.2xup;  coral3 = Schless BvW up 5e-5; 
+#pvr2 = BvW down 2e-5, stem cell 2e-10; violet= IPA.brown 1e-6, adipogen 4e-8
+
+adipoMods1 <- c( "MEcoral1", "MEcyan", "MEmediumorchid",
+                "MEsalmon",  "MEcoral3", "MEviolet", 
+                "MEdarkolivegreen",  "MEhoneydew", "MEsteelblue", "MEpalevioletred2",
+                 "MEpink", "MEgrey60", "MEfirebrick4",
+                  "MEcoral", "MEdarkred", "MEturquoise")
+adipoMods <- AT.mod.names %>% filter(Module %in% adipoMods1) %>% 
+            slice(match(adipoMods1, Module)) %>%
+            select(modNumber) %>% unlist() %>% unname()
+adipoModsExpr <- AT.MEs %>% select(SampleID, adipoMods)
+P <- plotModExpr(MEs=adipoModsExpr, anno=annoAT[,-c(14:46)], ncol=6,
+            title=NULL)
+
+P + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+          legend.position = c(.9, .15))+
+  ggtitle("A")+
+  # increase space around points in each plot
+  scale_y_continuous(breaks=scales::pretty_breaks(4, min.n=4), expand=expand_scale(mult=.15))
+
+
+
+```
+
+```{r fig.height=4}
+
+
+# regular free or fixed scales
+P <- plotChangeModPhenoCor(ME.change=AT.ME.PostvPre, Mods=adipoMods, pheno="BWpctChange_Wash.w2",  ncol=6, title="B (version 1)")
+P + xlab("Max % change in body weight") + #scale_color_manual(values="navyblue")+
+  scale_x_continuous(breaks=c(-8, -18, -28), limits=c(-29.5, -7))+
+  # increase space around points in each plot
+  scale_y_continuous(breaks=scales::pretty_breaks(4), expand=expand_scale(mult=.15))
+```
+
+### with fixed scales
+
+```{r, fig.width=7}
+
+P <- plotChangeModPhenoCor(ME.change=AT.ME.PostvPre, Mods=adipoMods, pheno="BWpctChange_Wash.w2",  ncol=6, scale="fixed", title="B (version 2)")
+P + xlab("Max % change in body weight") + scale_color_manual(values="navyblue")+
+  scale_x_continuous(breaks=c(-8, -18, -28), limits=c(-29.5, -7))
+  # increase space around points in each plot
+  
+```
+
+
+\newpage  
+## Figure 4. Divergent responses of genes involved in thermogenesis.  
+
+  
+
+
+<!-- ### A) Heatmap of thermo, lipo, neuro genes -->
+
+<!-- ```{r heatmap of thermo and lipogenesis genes, fig.height=6, fig.width=4} -->
+
+<!-- ### everything but immune genes #### -->
+
+<!-- thermoLipo <- grabGOIcounts(counts=voomCounts.AT, GOI=unique(c(neuro, lipogen, thermoBrownSig)), anno=heatanno) -->
+
+<!-- # heatmap.plus(as.matrix(allGOI), Colv = NA,  ColSideColors = sampColor, -->
+<!-- #              scale="none", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)]) -->
+
+<!-- # try removing rowmeans (kind of like scaling relative gene expression) -->
+<!-- thermoLipo.scale  <- thermoLipo - rowMeans(thermoLipo) -->
+
+<!-- heatmap.plus(as.matrix(thermoLipo.scale), Colv = NA,  ColSideColors = sampColor, -->
+<!--              scale="row", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)]) -->
+<!-- ``` -->
+<!-- ### B) Heatmap of immune genes -->
+<!-- ```{r, fig.height=3, fig.width=4} -->
+<!-- # heatmap with all imm genes together -->
+<!-- Immcounts <- grabGOIcounts(counts=voomCounts.AT, GOI=c(Imm1, Imm2), anno=heatanno) -->
+
+<!-- Immcounts.scale  <- Immcounts - rowMeans(Immcounts) -->
+
+<!-- heatmap.plus(as.matrix(Immcounts.scale), Colv = NA,  ColSideColors = sampColor, -->
+<!-- scale="row", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)]) -->
+<!-- ``` -->
+
+```{r, fig.height=7, fig.width=4}
+allGOI <- grabGOIcounts(counts=voomCounts.AT, GOI=unique(c(neuro, lipogen, thermoBrownSig, Imm1, Imm2)), anno=heatanno)
+
+# make color bars
+TPcolor <- ifelse(heatanno$Treatment=="FGF21.Pre", "orangered",
+                  ifelse(heatanno$Treatment=="FGF21.Post", "deepskyblue4",
+                         ifelse(heatanno$Treatment=="FGF21.Wash", "olivedrab", NA)))
+
+# sexColor <- ifelse(heatanno$Sex =="female", "salmon",
+#                   ifelse(heatanno$Sex==  "male", "turquoise", NA))
+
+sampColor <- as.matrix(data.frame(TP1 = TPcolor, TP2 = TPcolor ))
+
+
+geneColor <- ifelse(rownames(allGOI) %in% c(Imm1, Imm2), "deepskyblue4", 
+                  ifelse(rownames(allGOI) %in% c(neuro), "olivedrab",
+                      ifelse(rownames(allGOI) %in% c(thermoBrownSig), "orangered",
+                          ifelse(rownames(allGOI) %in% c(lipogen), "grey40", NA))))
+                    
+
+geneColor <- as.matrix(data.frame(G1 = geneColor, G2 = geneColor))
+
+
+# annotate gene names with statistical significance
+PvPsig <- AT.PostVsPre.I %>% filter(adj.P.Val < .25, HGNCsymbol %in% rownames(allGOI)) %>%
+  select(HGNCsymbol) %>% unlist()
+
+BWsig <- LMgenes.Change.treat %>% 
+  filter(BW.adjPval < .25, HGNCsymbol %in% rownames(allGOI)) %>%
+  select(HGNCsymbol) %>% unlist()
+
+genesWstats <- data.frame(HGNCsymbol = rownames(allGOI), withPvPsig = paste0(rownames(allGOI)," "))
+
+# attach asterixes to genes sig DE between pre and post
+genesWstats[genesWstats$HGNCsymbol %in% PvPsig,  "withPvPsig"] <- paste(genesWstats[genesWstats$HGNCsymbol %in% PvPsig,  "withPvPsig"], "+", sep="")
+
+# attach plus signs to genes sig DE with body weight
+genesWstats$withBoth <- genesWstats$withPvPsig
+genesWstats[genesWstats$HGNCsymbol %in% BWsig,  "withBoth"] <- paste(genesWstats[genesWstats$HGNCsymbol %in% BWsig,  "withPvPsig"], "o", sep="")
+
+# make a label bar for modules to add later in acrobat- essentially need to make the module numbers the rownames.
+# what modules are all these genes in?
+modcode <- AT.mods %>% filter(HGNCsymbol %in% rownames(allGOI)) 
+
+modcode <- modcode[match(rownames(allGOI), modcode$HGNCsymbol),]
+
+
+
+
+# replace rownames
+rownames(allGOI) <- genesWstats$withBoth
+
+# heatmap.plus(as.matrix(allGOI), Colv = NA,  ColSideColors = sampColor,
+#              scale="none", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)])
+
+# remove rowmeans (like scaling relative gene expression)
+allGOI.scale  <- allGOI - rowMeans(allGOI)
+
+# heatmap.plus(as.matrix(allGOI.scale), Colv = NA,  ColSideColors = sampColor,
+             # scale="row", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)])
+
+# with gene pathway color code
+heatmap.plus(as.matrix(allGOI.scale), Colv = NA,  ColSideColors = sampColor,
+             RowSideColors = geneColor,
+             scale="row", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)])
+
+
+# second version with module labels to add in acrobat
+pdf(file="PAPER/Paper plots/Final/Fig4_mod_labels.pdf", height=7, width=4)
+heatmap.plus(as.matrix(allGOI.scale), Colv = NA,  ColSideColors = sampColor,
+             RowSideColors = geneColor, labRow = modcode$modNumber,
+             scale="row", col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)])
+dev.off()
+
+
+```
+
+```{r, fig.height=8, fig.width=5}
+
+# # make a heatmap legend for gene expression
+# heatmap3(as.matrix(allGOI.scale), col=rev(brewer.pal(n=10, name="RdBu"))[-c(5,6)],
+#         scale="row", Colv = NA )
+
+
+
+allGOIsig <- LMgenes.Change.treat %>% filter(HGNCsymbol %in% rownames(allGOI)) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+```
+
+
+
+
+
+```{r Sig DE genes from thermo pathways, fig.height=4.5}
+
+# Investigate brown fat more thoroughly
+# # brown fat genes that are DE
+brownSig <- AT.PostVsPre.I %>% 
+  filter(GeneID %in% unique(c(OBtrim.GS$IPA_Quantity.of.brownadipose.tissue, OBtrim.GS$IPA_Mass.of.brown.adipose.tissue))) %>% 
+  filter(adj.P.Val<.25, abs(logFC) > .33) %>% arrange(P.Value)
+
+# AT.mods %>% filter(GeneID %in% unique(c(OBtrim.GS$IPA_Quantity.of.brownadipose.tissue, OBtrim.GS$IPA_Mass.of.brown.adipose.tissue)))
+
+# P <- plotGOI.paired.HGNC(c(brownSig$HGNCsymbol), voomCounts.AT, anno=annoAT, ncol=5, title="Quantity of brown fat genes significantly regulated by treatment and weight loss")
+# P + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = "none")
+
+brownSig2 <- LMgenes.Change.treat %>% filter(GeneID %in% brownSig$GeneID) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+  
+# brownSig2 %>% mutate(BW.adjPval2 = p.adjust(BW.Pval, method="BH", n=nrow(brownSig)))
+
+# #change with change in pheno
+# P <- plotGOIchVphenoCh(GOI=brownSig2$HGNCsymbol[1:6], counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=3, title="Change in brown fat genes vs change in body weight")
+# P + xlab("Max % change in body weight")
+
+###### adj p val cutoff is .25, or .1 if going with adjpval2  #####
+
+
+
+# THERMOGENESIS
+
+thermo <- c(OBtrim.GS$IPA_thermogenesis)
+# MMGtoHGNC %>% filter(GeneID %in% thermo)
+# plotGOI.paired.ensg(thermo[1:30], voomCounts.AT, anno=annoAT, title="Expression of fat browning genes")
+# plotGOI.paired.ensg(thermo[31:67], voomCounts.AT, anno=annoAT, title="Expression of fat browning genes")
+# 
+# plotGOI.pairedxTime(GOI=thermo[31:67], IDtype="GeneID", counts=voomCounts.AT, pheno="BW.con",
+#                     anno=AT.PD.T %>% filter(Treatment %in% c("FGF21.Post", "FGF21.Pre")),
+#                                  pointColor="Treatment", xlab="Body Weight", title=NULL, ncol=5)
+
+
+# # get ranks for association with BW
+# AT.BWcon %>% filter(HGNCsymbol %in% thermoUp) #%>% filter(adj.P.Val<.1) %>% select(HGNCsymbol)
+# 
+# AT.BWcon %>% filter(GeneID %in%c(OBtrim.GS$IPA_thermogenesis)) %>% filter(adj.P.Val<.1) %>% select(HGNCsymbol, adj.P.Val)
+# 
+# # get ranks for DE with treatment
+# AT.PostVsPre.I %>% filter(HGNCsymbol %in% thermoUp) %>% filter(adj.P.Val<.1) %>% select(HGNCsymbol)
+# 
+# AT.PostVsPre.I %>% filter(GeneID %in%c(OBtrim.GS$IPA_thermogenesis)) %>% filter(adj.P.Val<.2) %>% select(HGNCsymbol, logFC, adj.P.Val)
+
+# # thermogenesis genes that are DE
+thermoSig <- AT.PostVsPre.I %>% 
+  filter(GeneID %in% unique(c(OBtrim.GS$IPA_thermogenesis, OBtrim.GS$IPA_Function.of.brown.adipose.tissue, OBtrim.GS$IPA_Developmental.process.of.brown.adipocytes, OBtrim.GS$IPA_Developmental.process.of.brown.adipose.tissue))) %>%
+filter(adj.P.Val<.25, abs(logFC) > .33) %>% arrange(P.Value)
+
+ # AT.mods %>% filter(GeneID %in% unique(c(OBtrim.GS$IPA_thermogenesis, OBtrim.GS$IPA_Function.of.brown.adipose.tissue)))
+
+# P <- plotGOI.paired.HGNC(c(thermoSig$HGNCsymbol), voomCounts.AT, anno=annoAT, ncol=4, title="C. Thermogenesis genes significantly regulated by treatment and weight loss")
+# P + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = "none")
+#Pro = SLN
+#inhib = E2F1
+
+thermoSig2 <- LMgenes.Change.treat %>% 
+  filter(GeneID %in% thermoSig$GeneID | HGNCsymbol %in% c("KLHL13", "TMEM26", "PRDM16")) %>% 
+  select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval)
+
+# thermoSig2 %>%  mutate(BW.adjPval2 = p.adjust(BW.Pval, method="BH", n=nrow(thermoSig)))
+
+
+# P <- plotGOIchVphenoCh(GOI=thermoSig2$HGNCsymbol[1:8], counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=4, title="D. Change in Thermogenesis genes vs change in body weight")
+# P + xlab("Max % change in body weight")
+
+
+
+# BvW <- c(OBtrim.GS$Schless_MsBvWandFGF21_5x_up)
+# plotGOI.paired.ensg(BvW, voomCounts.AT, anno=annoAT, title="Expression of brown fat and FGF21-induced genes", ncol=10)
+# plotGOI.paired.ensg(brown[31:67], voomCounts.AT, anno=annoAT, title="Expression of fat browning genes")
+# 
+# # brown genes that actually go up!
+# thermoUp <- c("UCP1", "UCP2", "UCP3", "ACSS1", "ADORA2B", "ADRB1", "CEBPD", "GPD2", "IL10", "KCNAB2", "KDM3A", "LEPR", "NCOA2", "OMA1", "SERTAD2", "SLC27A")
+# plotGOI.paired.HGNC(thermoUp, voomCounts.AT, anno=annoAT, title="Expression of thermogenesis genes")
+
+# ox phos
+
+
+## brown and thermo together
+
+thermoBrownSig <- unique(c(brownSig2$HGNCsymbol[1:6],thermoSig2$HGNCsymbol[1:8]))
+
+#arrange for figure- brown, then both, then thermo.  UCP1 included for interest.
+thermoBrownSig <- c("ADIPOR2", "AGPAT2", "LIPA", "TMEM26", "KLHL13", "LEP",  "KDM3A", "PPARG", "ELOVL3", "INHBA", "KCNAB2", "MRAP",  "SLC2A4", "UCP1", "UCP2" )
+                    
+                 
+# P <- plotGOI.paired.HGNC(GOI=thermoBrownSig, voomCounts.AT, anno=annoAT, ncol=6, title="C")
+# P + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = c(.9, .15))
+# 
+# P <- plotGOIchVphenoCh(GOI=thermoBrownSig, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=6, title="D")
+# P + xlab("Max % change in body weight")
+
+
+
+# for results, discussion:
+# adipor2 = adiponectin receptor2, anti-therm?  ADPN is anti-thermogenesis, but doesn't require adipoR1 or2 (Qiao 2014). adipor2 higher in fasted mouse fat (bluher 2005).
+# agpat2 = lipid biosynthesis, lack = total lack of adipose tissue b/c adipocytes can't form (cautivo 2016)
+# lipa = needed for thermogenesis (Duta-Mare 2018), KO mice have huge lipid depots (Du 2001)
+# lep = leptin promotes fat browning and thermogenesis
+# KMD3A = modifies histones favorably to make browning genes available (Abe 2015)
+# PPARG = master regulator of adipogenesis, induce browning, but unclear...
+# ELOVL3 = makes very long chain FAs as fuel for thermogenesis, required for thermogenisis, but, ko mice also do not store lipids and resist DIO (reviewed in Townsend 2015)
+# INHIBA needed for fat storage, kd = mice that expend more energy (Li, Shen, Bournat 2009)
+# MRAP necessary for lipolysis; overexpression = increased EE (Zhang 2017)
+# SLC2A4 = glut4, should increase upon cold exposure and promote thermogenesis, more highly expressed in BAT (Lee, Bova 2016)
+# UCP2 up for debate!  (reviewed in solomonson 2016)
+
+
+
+thermoSig3 <- AT.PostVsPre.I %>% 
+  filter(GeneID %in% unique(c(OBtrim.GS$IPA_thermogenesis, OBtrim.GS$IPA_Function.of.brown.adipose.tissue, OBtrim.GS$IPA_Developmental.process.of.brown.adipocytes, OBtrim.GS$IPA_Developmental.process.of.brown.adipose.tissue))) 
+
+#c("KLHL13", "TMEM26", "PRDM16")
+
+thermoSig4 <- left_join(thermoSig3[,c(4,5,6,8,9,11)], LMgenes.Change.treat[,c(4,14:16)])
+
+# write.csv(thermoSig4, "Results/ThermoGene_results.csv", row.names=FALSE)
+
+
+
+
+```
+
+```{r check out  browning genes}
+
+
+browndownSig <- AT.PostVsPre.I %>% 
+  filter(GeneID %in% unique(c(GOI$GeneID)) ) %>% 
+  filter(adj.P.Val<.25, abs(logFC) > .33) %>% arrange(P.Value)
+
+
+browndownSig2 <- LMgenes.Change.treat %>% filter(GeneID %in% GOI$GeneID ) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+
+# by treatment
+# P <- plotGOI.paired.HGNC(c(browndownSig2$HGNCsymbol[1:16], "ANGPTL8"), voomCounts.AT, anno=annoAT, ncol=5, title="C. Expression of TG and FA biosynthesis genes regulated by treatment")
+# P + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = "bottom")
+ 
+
+```
+
+
+
+
+<!-- ## Figure 5. Transcriptomic changes in lipogenesis are associated with FGF21-induced weight loss -->
+
+
+<!-- ### A and B) Genes plotted against BW loss -->
+
+```{r TG mod, fig.height=4.5}
+
+# details on grey60
+Module <- "grey60"
+
+geneSets <- c("REACTOME_TRIGLYCERIDE_BIOSYNTHESIS",
+"REACTOME_FATTY_ACYL_COA_BIOSYNTHESIS",
+"IPA_conversion.of.acyl.coenzymeA",
+"IPA_modification.of.acyl.coenzymeA",
+"IPA_synthesis.of.acyl.coenzymeA",
+"BURTON_ADIPOGENESIS_6"
+# "KEGG_PYRUVATE_METABOLISM",
+# "REACTOME_INTEGRATION_OF_ENERGY_METABOLISM",
+# "HALLMARK_FATTY_ACID_METABOLISM"
+              )
+
+gsg <- unique(unlist(HandC2.GS[names(HandC2.GS) %in% geneSets]))
+gsg2 <- unique(unlist(OBtrim.GS[names(OBtrim.GS) %in% geneSets])) 
+gsg <- unique(c(gsg2, gsg))  # 347 unique genes
+mg <- AT.mods %>% filter(moduleColor==Module) #217
+GOI <- mg %>% filter(GeneID %in% gsg) # 20 genes
+# GOI
+
+TGsynth <- c("ANGPTL8", "ACACA", "ACLY", "ACSS2", "DGAT2", "ELOVL3", "ELOVL6", 
+             "FADS2", "FASN", "GPAM", "GPAT4", "MECR", "MOGAT1", "NRG4", "SCD")
+
+
+TGsynthSig <- AT.PostVsPre.I %>% 
+  filter(GeneID %in% unique(c(GOI$GeneID, TGsynth)) | HGNCsymbol %in% TGsynth) %>% 
+  filter(adj.P.Val<.25, abs(logFC) > .33) %>% arrange(P.Value)
+
+
+TGsynthSig2 <- LMgenes.Change.treat %>% filter(GeneID %in% TGsynthSig$GeneID | HGNCsymbol %in% c("NRG4", "ANGPTL8")) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) 
+
+# by treatment
+# P <- plotGOI.paired.HGNC(c(TGsynthSig2$HGNCsymbol[1:16], "ANGPTL8"), voomCounts.AT, anno=annoAT, ncol=6, title="A")
+# P + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = c(.93,.1))
+#  
+### could take out AGPAT2 and ELOVL3 because already shown in thermogenesis gene set.
+# "SLC25A10" "TKT"      "MECR"     "RETSAT"   "DGAT2"    "ACAD9"    "MGST1"    "ACACA"    "ACSS2"    "CDKN2C"   "THRSP"    "SLC25A1"  "AGPAT2"   "ELOVL3"   "FASN"     "NRG4"  
+# P <- plotGOIchVphenoCh(GOI=c(TGsynthSig2$HGNCsymbol[1:16], "ANGPTL8"), counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=6, title="B")
+# P+ xlab("Max % change in body weight")
+
+# TKT counteracts oxidative stress (Ming-Jing Xu 2016 PNAS)
+# SLC25A10 translocates substrates across mt membrane, providing substrate for fatty acid synthesis, KO = decreased lipid accumulation in mice (Mizuarai 2005, Kulyte 2017)
+#MECR = fatty acid synthesis in mt
+# RETSAT KO = increased weight gain (Pang 2017), increased adiposity, upreg of PPARG ( Moise 2010)
+# DGAT2 mediates TG synthesis and lipid droplet growth (Harris 2011, Wilfling 2013)
+
+#check rankings in Pre vs post DEG list
+# AT.PostVsPre.I %>% filter(HGNCsymbol %in% TGsynth) %>% select(HGNCsymbol, P.Value, adj.P.Val)
+
+# AT.PostVsPre.I %>% filter(GeneID %in% HandC2.GS$REACTOME_TRIGLYCERIDE_BIOSYNTHESIS) %>% select(HGNCsymbol, P.Value, adj.P.Val)
+
+
+# plotGOI.paired.HGNC(c("PLIN2","PLIN3", "ATGL", "LIPE", "ACOX1", "CPT1A", "SNAP23", "COPA", 'BSCL2', "CIDEA"), voomCounts.AT, anno=annoAT, title="Expression of lipid droplet and FA oxidation genes")
+
+
+```
+<!-- ### C and D) Neuronal genes   -->
+
+```{r, fig.height=4.5}
+
+# grey60 contains some neuron/synapse related genes
+
+neuron <- unique(c("SYNM", "GABRB1", "CAMK2A", "PARK2", "RIMS4", "UCHL1", "DMD", "LDLRAP1", "SYNPO", "CAP2", "SYT3", "SIGMAR1", "ACAD9", "MAGI2", "ELMOD3", "COBL", "SYPL2", "SYN1", "DHODH", "GCHFR", "PICK1", "OPN1SW", "CTTN", "LRRC7", "SCNBA", "PICK1", "REEP6", "KPTN", "CHRND", "GSG1L", "SYNPO", "FGFR2", "CAP2", "SNTA1", "WWC1", "FAM19A4"))
+
+# AT.mods %>% filter(HGNCsymbol %in% neuron)  all in grey60
+
+neuronSig <- AT.PostVsPre.I %>% 
+  filter(HGNCsymbol %in% unique(c(neuron))) %>% 
+  filter(adj.P.Val<.25, abs(logFC) > .33) %>% arrange(P.Value)
+
+# P <- plotGOI.paired.HGNC(neuron, voomCounts.AT, anno=annoAT, ncol=5, title="E. Expression of neuronal signalling related genes")
+# P + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = c(.93,.17))
+
+neuronSig2 <- LMgenes.Change.treat %>% 
+  filter(GeneID %in% neuronSig$GeneID) %>% 
+  select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval)
+
+
+
+# because grey60 has neuronal genes in it,
+# check out norepinephrine signalling:  REACTOME_NOREPINEPHRINE_NEUROTRANSMITTER_RELEASE_CYCLE and GO_REGULATION_OF_NOREPINEPHRINE_SECRETION
+# added RIMS4 (neurotransmitter release), and FAM19A4
+
+norep <- c("MAOA","RAB3A","RIMS1","SLC18A2","SLC22A2","SNAP25","STX1A","STXBP1","SYT1","VAMP2","ADRA2A","ADRA2B","ADRA2C","AGT","AGTR2","CRH","CRHR2","FFAR3","HRH3","KCNB1","OXT","OXTR","P2RY1","P2RY12","PTGER3","PTGS1", "RIMS4", "FAM19A4")
+
+# AT.mods %>% filter(HGNCsymbol %in% norep) 
+
+# Reactome neurotransmitter release cycle
+neuroT <- c("ABAT","ALDH5A1","CHAT","DNAJC5","GAD1","GAD2","GLS","GLS2","HSPA8","MAOA","RAB3A","RIMS1","SLC17A7","SLC18A2","SLC18A3",'SLC1A1',"SLC1A6","SLC1A7","SLC22A2","SLC32A1","SLC38A2","SLC5A7","SLC6A1","SLC6A11","SLC6A12","SNAP25","STX1A","STXBP1","SYN1","SYN2","SYN3","SYT1","UNC13B","VAMP2"
+)
+
+# AT.mods %>% filter(HGNCsymbol %in% neuroT) 
+
+Innerv <- c("COL25A1","FBXO45","GABRA5","GABRB2","GABRB3","ISL1","LRIG1","LRIG2","NPTX1","NRP1","NTF4","NTRK1","POU4F1","PRKCG","RET","RNF165","SEMA3A","SERPINE2","SLITRK6","SULF1","SULF2","UNC13A","UNC13B")
+
+# currently not including axon gene set.  None of the sig genes (first 5) are contained in grey60 module, but most have genetic associations with obesity!  Could help link NRG4 in, because all involved in axon guidance.
+Axon <- c("AMIGO1","APOE","BAI1","BAIAP2","CDK5R1","CNTN4","CYFIP1","DPYSL5","FEZ1","FEZ2","GLI2","KAL1","KLK8","LRRC4C","MAPT","NRP1","NRP2","NRXN1","NRXN3","NTNG1","NTNG2","OPHN1","OTX2",
+"PARD3","PARD6B","PAX2","POU4F1","ROBO1","ROBO2","RTN4","RTN4RL1",'RTN4RL2',"S100B","SEMA3B",
+"SEMA4F","SHH","SIAH1","SLIT1","SLIT2","SPON2","THY1","UBB","UNC5C")
+
+# AT.mods %>% filter(HGNCsymbol %in% Axon) 
+
+# AT.mods %>% filter(HGNCsymbol %in% Innerv) 
+
+norepSig <- AT.PostVsPre.I %>% 
+  filter(HGNCsymbol %in% unique(c(norep))) %>% 
+  filter(adj.P.Val<.25, abs(logFC) > .2) %>% arrange(P.Value)
+
+norepSig2 <- LMgenes.Change.treat %>% 
+  filter(GeneID %in% norepSig$GeneID) %>% 
+  select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval)
+
+neuroTSig <- AT.PostVsPre.I %>% 
+  filter(HGNCsymbol %in% unique(c(neuroT))) %>% 
+  filter(adj.P.Val<.25, abs(logFC) > .2) %>% arrange(P.Value)
+
+neuroTSig2 <- LMgenes.Change.treat %>% 
+  filter(GeneID %in% neuroTSig$GeneID) %>% 
+  select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval)
+
+InnervSig <- AT.PostVsPre.I %>% 
+  filter(HGNCsymbol %in% unique(c(Innerv))) %>% 
+  filter(adj.P.Val<.25, abs(logFC) > .2) %>% arrange(P.Value)
+
+InnervSig2 <- LMgenes.Change.treat %>% 
+  filter(GeneID %in% InnervSig$GeneID) %>% 
+  select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval)
+
+
+AxonSig <- AT.PostVsPre.I %>% 
+  filter(HGNCsymbol %in% unique(c(Axon))) %>% 
+  filter(adj.P.Val<.25, abs(logFC) > .2) %>% arrange(P.Value)
+
+AxonSig2 <- LMgenes.Change.treat %>% 
+  filter(GeneID %in% AxonSig$GeneID) %>% 
+  select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval)
+
+
+#all together now
+
+neuroSig <- AT.PostVsPre.I %>% 
+  filter(HGNCsymbol %in% unique(c(neuron, norep, neuroT, Innerv))) %>% 
+  filter(adj.P.Val<.25, abs(logFC) > .2) %>% arrange(P.Value)
+
+neuroSig2 <- LMgenes.Change.treat %>% 
+  filter(GeneID %in% neuroSig$GeneID) %>% 
+  select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval)
+
+# AT.mods %>% filter(HGNCsymbol %in% neuroSig2$HGNCsymbol[1:15]) 
+
+# AT.MM %>% filter(HGNCsymbol %in% neuroSig2$HGNCsymbol[1:15]) %>% select(HGNCsymbol, MMgrey60, MMpink, MMplum1, MMgreenyellow, MMbrown, MMblack)
+
+# PTGER3 has high MM in Grey60, as do MAOA and FAM19A4!  Only first four genes not very related to grey60
+```
+
+```{r, fig.height=4}
+
+# P <- plotGOI.paired.HGNC(neuroSig2$HGNCsymbol[1:13], voomCounts.AT, anno=annoAT, ncol=6, title="C. Expression of neuronal genes")
+# P + theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+#           legend.position = c(.93,.17))
+
+# P<- plotGOIchVphenoCh(GOI=neuroSig2$HGNCsymbol[1:13], counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=6, title="D. Neuronal signalling genes associated with increased weight loss")
+# P+xlab("Max % change in body weight")
+
+
+# for results/discussion
+# irrelevant? ELMOD3 engulfment and cell motility, association with deafness
+# GABRB1 = GABA receptor.... GABA receptor A signaling blunts NE (Hedrington 2015), GABARB signaling whitens brown fat (Ikegami 2017), but GABA B signaling needed for thermogenesis? (Queva 2003)
+# RIMS4 exocytosis of neurotransmitter vesicles (like RAB3A)
+# plot is not great SIGMAR1 = sigma receptor, enhances neurotransmitter signalling and neurite outgrowth (Fishback 2014)??  Also antigonizes NE signalling (Gonzalez-Alvarez 1995)  UNCLEAR!
+# ACAD9 initial step in Mt beta oxidation.  Also in TG/FA gene set!
+
+# P2RY1 supports leptin secretion in AT (Laplante 2010), negative regulation of NE secretion (source??). Goes down with treatment, and increased expression with increased weightloss
+# MAOA breaks down neurotransmitters like NE, so lower levels of MAOA = higher levels of NE (and dopamine).  MAOA genetic variants associated with obesity (Need 2006).
+# PTGER3 regulates adipogenesis - KO mice have increased lipolysis and increased mac infiltrate in AT (Ceddia 2016). PGE2 signaling downregulates NE-stimulated lipolysis (refs in Ceddia)
+# non-sig trend KCNB1 potassium voltage channel ; some associations with diabetes or obesity
+# non-significant trend RAB3A exocytosis of neurotransmitter vesicles
+# PARK2 induces lipid uptake via CD36.  KO mice protected from obesity. (Kim 2011 JCI)
+# KPTN KO = increased BW (White 2013 Cell)
+```
+
+
+
+<!-- #  -->
+<!-- ```{r Follow up genes Hidden figure} -->
+
+<!-- followUp <- c("ANGPTL8", "NRG4", "FAM19A4", "UCP1", "UCP2", "LEP", "LEPR", "FGF21") -->
+
+<!-- ## change between pre and post -->
+<!-- AT.PostVsPre.I %>% filter(HGNCsymbol %in% followUp) %>% select(HGNCsymbol,logFC, P.Value, adj.P.Val) -->
+
+<!-- plotGOI.paired.HGNC(followUp, counts=voomCounts.AT, by="Treatment",  -->
+<!--                     anno=annoAT, group="AnimalID", ncol=4, -->
+<!--                     title="Expression of follow up genes") -->
+
+
+<!-- plotGOI.phenCor.HGNC(GOI=followUp, counts=voomCounts.AT, pheno="BW.con",  -->
+<!--                      anno=AT.PD.T, color="Treatment", ncol=4, -->
+<!--                      title="Genes associated with BW") -->
+
+
+<!-- plotGOI.phenCor.HGNC(GOI=followUp, counts=voomCounts.AT, pheno="BWpctCh.lag.maxCh",  -->
+<!--                      anno=AT.PD.T, color="Treatment", ncol=4, -->
+<!--                      title="Genes associated with BW") -->
+
+<!-- # movement with BW across time -->
+<!-- AT.BWcon %>% filter(HGNCsymbol %in% followUp) %>% select(HGNCsymbol,logFC, P.Value, adj.P.Val) -->
+
+<!-- plotGOI.pairedxTime(GOI=followUp, IDtype="HGNCsymbol", counts=voomCounts.AT, -->
+<!--                     pheno="BWpctCh.lag.wash2", group="AnimalID",  -->
+<!--                     anno=AT.PD.T %>% filter(Treatment %in% c("FGF21.Pre", "FGF21.Post")), -->
+<!--                     pointColor="Treatment", xlab=pheno,  ncol=4, -->
+<!--                     title=NULL) -->
+
+
+<!-- # association of magnitude of change -->
+<!-- LMgenes.Change.treat %>% filter(HGNCsymbol %in% followUp) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) -->
+
+<!-- LMgenes.Ch.regain %>% filter(HGNCsymbol %in% followUp) %>% select(HGNCsymbol, BW.Est.s, BW.Pval.s, BW.adjPval.s, BW.Est, BW.Pval, BW.adjPval) %>% arrange(BW.Pval) -->
+
+<!-- plotGOIchVphenoCh(GOI=followUp, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", -->
+<!--                   anno=annoAT, ncol=4,  -->
+<!--                   title="Change in gene expr vs change in body weight") -->
+
+<!-- ``` -->
+
+\newpage
+## Figs 5,6, S5: RNAseq expression plots for genes overexpressed in mice  
+
+Figures 5 a and b, 6 a and b, and Supplementary Figure 5 a and B
+
+```{r, fig.height=3.3, fig.width=1.8}
+
+
+# first figure out shared y axis scale for all three together
+
+# tmp1 <- plotGOI.paired.HGNC(c("ANGPTL8", "NRG4", "FAM19A4"), voomCounts.AT, anno=annoAT, title="", scale="fixed")
+# tmp1
+# ggplot_build(tmp1)$layout$panel_scales_y[[1]]$range$range
+
+# tmp <- plotGOIchVphenoCh(GOI=c("ANGPTL8", "NRG4", "FAM19A4"), counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, scale="fixed")
+# tmp
+# ggplot_build(tmp)$layout$panel_scales_y[[1]]$range$range
+
+
+P1 <- plotGOI.paired.HGNC.1("ANGPTL8", voomCounts.AT, anno=annoAT, title="ANGPTL8")
+P1 <- P1 + theme(axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_y_continuous(limits=c(-.48,8), breaks=c(0,2,4,6,8))
+
+P2 <- plotGOIchVphenoCh.1(GOI="ANGPTL8", counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT)
+P2 <- P2 +xlab("Max % change BW")+
+  scale_x_continuous(breaks=c(-8, -18, -28))+
+  ylim(-5.28, 1.41)
+
+grid.arrange(P1,P2)
+
+
+
+P1 <- plotGOI.paired.HGNC.1("NRG4", voomCounts.AT, anno=annoAT, title="NRG4")
+P1 <- P1 + theme(axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_y_continuous(limits=c(-.48,6), breaks=c(0,2,4,6))
+
+P2 <- plotGOIchVphenoCh.1(GOI="NRG4", counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT)
+P2 <- P2 +xlab("Max % change BW")+
+  scale_x_continuous(breaks=c(-8, -18, -28))+
+  ylim(-5.28, 1.41)
+
+grid.arrange(P1,P2)
+
+
+
+P1 <- plotGOI.paired.HGNC.1("FAM19A4", voomCounts.AT, anno=annoAT, title="FAM19A4")
+P1 <- P1 + theme(axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_y_continuous(limits=c(2,8), breaks=c(0,2,4,6,8))
+
+P2 <- plotGOIchVphenoCh.1(GOI="FAM19A4", counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT)
+P2 <- P2 +xlab("Max % change BW")+
+  scale_x_continuous(breaks=c(-8, -18, -28))+
+  ylim(-5.28, 1.41)
+
+grid.arrange(P1,P2)
+
+```
+
+\newpage
+## Figure 5. Overexpression of ANGPTL8 increases plasma TG levels in mice. 
+
+*Plots for this figure were made in Prism*  
+
+ANGPTL8 increased TG levels and did not effect body weight  
+
+```{r, out.width = "500px"}
+knitr::include_graphics("PAPER/FollowUp Targets/ANGPTL8_placeholder.png")
+```
+
+\newpage  
+## Figure 6. Overexpression of NRG4 reduced weight gain in DIO mice  
+
+*Plots for this figure were made in Prism*   
+
+NRG4 reduced weight gain in growing DIO mice, reduced fat mass gain in DIO mice, did not affect plasma TG levels.  
+
+```{r, out.width = "500px"}
+knitr::include_graphics("PAPER/FollowUp Targets/NRG4_placeholder.png")
+```
+
+
+
+
+
+
+
+
+
+
+
+<!-- ##  Transcriptional changes associated with weight regain during washout period -->
+
+<!-- ```{r} -->
+
+<!-- # for the most part, all genes that are associated with weight regain are associated with weight loss.  Because the monkeys that lose the most weight gain the most weight back, genes associated with weight gain are associated with weight loss. -->
+
+<!-- #compare wash vs post with post vs pre -->
+<!-- topPvP <- AT.PostVsPre.I %>% filter(adj.P.Val < .4, abs(logFC) > .1) -->
+
+<!-- topWvPo <- AT.WashVsPost.I %>% filter(adj.P.Val < .05, abs(logFC) > 1) -->
+
+<!-- washNotTreat <- topWvPo %>% filter(!HGNCsymbol %in% topPvP$HGNCsymbol) -->
+
+<!-- P <- plotGOI.paired.HGNC(c(washNotTreat$HGNCsymbol[1:20]), voomCounts.AT, anno=annoAT, ncol=4, title="Genes different in Washout but not treatment") -->
+<!-- P + theme(axis.ticks = element_blank(), axis.text.x = element_blank(), -->
+<!--           legend.position = "none") -->
+
+
+
+
+
+\newpage
+## Figure 7. Summary of transcriptomic changes in AT in response to FGF21-induced weight loss.  
+
+*This figure was made in powerpoint and adobe illustrator*
+
+
+
+
+
+
+\newpage
+# Supplementary Figures    
+
+
+
+Could send some of the PCA plots from analysis script to reviewers to show negligible effect of confounding factors (Sex, starting weight)
+
+## New Fig S1) Overview of data, check for confounding factors
+```{r}
+
+### S1a) PCA of adipose tissue
+
+lcpm.normCounts.AT <- lcpm.normCounts.AT[, match(annoAT$SampleID, colnames(lcpm.normCounts.AT))]
+
+AT.PCA <- runPCA(lcpm.normCounts.AT, annoAT)
+
+AT.PCA$pdatScores$Treatment <- factor(AT.PCA$pdatScores$Treatment, levels = c("FGF21.Pre",  "FGF21.Post", "FGF21.Wash"))
+
+p1 <- ggplot(AT.PCA$pdatScores, aes(x=PC1, y=PC2, color=Treatment, shape=Treatment)) + 
+  geom_point(size=3, alpha=.8) +
+  scale_color_manual(values =c("orangered", "deepskyblue4", "olivedrab"), labels = c("Pre", "Post", "Wash") )+
+  scale_shape_manual(values = c(16,17,15), labels = c("Pre", "Post", "Wash"))+
+  labs(x = AT.PCA$PCi$PC1, y = AT.PCA$PCi$PC2)+
+  ggtitle("Adipose tissue")+
+  theme.10
+
+# S1b) PC1 vs startweight - shows same pattern of response between males and females
+
+p2 <- ggplot(AT.PCA$pdatScores, aes(x= startWeight, y= PC1, color = Treatment, shape=Sex, group=AnimalID))+
+  geom_line(color = "grey")+
+  geom_point(size = 3)+
+  scale_color_manual(values = c("orangered", "deepskyblue4", "olivedrab"), labels = c("Pre", "Post", "Wash"))+
+  ggtitle("Adipose tissue")+
+  xlab("Starting body weight")+
+  theme.10
+
+
+# S1c) PCA of skeletal muscle samples showing craziness.
+lcpm.normCounts.G <- lcpm.normCounts.G[, match(annoG$SampleID, colnames(lcpm.normCounts.G))]
+
+G.PCA <- runPCA(lcpm.normCounts.G, annoG)
+
+G.PCA$pdatScores$Treatment <- factor(G.PCA$pdatScores$Treatment, levels = c("FGF21.Pre",  "FGF21.Post", "FGF21.Wash"))
+
+p3 <- ggplot(G.PCA$pdatScores, aes(x=PC1, y=PC2, color=Treatment, shape=Treatment)) + 
+  geom_point(size=3, alpha=.8) +
+  scale_color_manual(values =c("orangered", "deepskyblue4", "olivedrab"), labels = c("Pre", "Post", "Wash") )+
+  scale_shape_manual(values = c(16,17,15), labels = c("Pre", "Post", "Wash"))+
+  labs(x = G.PCA$PCi$PC1, y = G.PCA$PCi$PC2)+
+  ggtitle("Skeletal Muscle")+
+  theme.10
+
+
+# S1d) PC1 vs startweight - shows two groups of animals responding in opposite directions.
+
+p4 <- ggplot(G.PCA$pdatScores, aes(x= startWeight, y= PC1, color = Treatment, shape=Sex, group=AnimalID))+
+  geom_line(color = "grey")+
+  geom_point(size = 3)+
+  scale_color_manual(values = c("orangered", "deepskyblue4", "olivedrab"), labels = c("Pre", "Post", "Wash"))+
+  ggtitle("Skeletal Muscle")+
+  xlab("Starting body weight")+
+  theme.10
+
+
+# make into figure
+
+PCAleg <- share_legend(p1)
+weightleg <- share_legend(p4)
+
+pdf(file = "Resubmission/paper_PCAs.pdf", height = 5, width = 6.75)
+grid.arrange(arrangeGrob(p1 + theme(legend.position="none"),
+                               p3 + theme(legend.position="none"), PCAleg, nrow=1, ncol=3, widths=c(3,3,2)),
+            arrangeGrob(p2 + theme(legend.position="none"),
+                               p4 + theme(legend.position="none"), weightleg, nrow=1, ncol=3, widths=c(3,3,2)), nrow=2)    
+dev.off()
+
+
+
+
+# degree of weight loss with start weight
+
+pdf(file="Resubmission/startBWvsLoss.pdf", height =2, width= 3)
+ggplot(annoAT.PD, aes(x=startWeight, y=-BWpctChange_maxCh))+
+  geom_point(size= 3, aes(color = Sex, shape=Sex))+
+  scale_color_manual(values = c("deepskyblue4", "olivedrab"))+
+  xlab("Starting body weight")+
+  ylab("Max percent change in body weight")+
+  theme.10
+dev.off()
+
+
+
+
+cor.test(annoAT.PD$startWeight, -(annoAT.PD$BWpctChange_maxCh), method = "spearman")
+
+
+
+```
+
+## Figure S1) FGF21 treatment and weight loss associated transcriptional changes in Skeletal Muscle.
+
+
+
+
+```{r Gastroc volcano plots, , fig.height=2, fig.width=6}
+
+# # Post vs Pre adjusted
+# ggplot(Gas.PostVsPre.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+#   geom_point(alpha=.6)+
+#   #ylim(0,4)+
+#   scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+#   xlab("log2 fold change in expression")+
+#   ylab("-log10 adjusted p value")+
+#   ggtitle("DEG in post- vs pre-treatment gastrocnemius tissue")
+
+# Post vs Pre 
+P1 <- ggplot(Gas.PostVsPre.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+  geom_point(alpha=.3)+
+  scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+  xlab("Log2 FC Post vs Pre")+
+  ylab("-Log10 FDR")+
+  ylim(0,8)+
+  xlim(-4,4)+
+  theme.10+
+  theme(legend.position="none")
+
+
+# Wash vs Pre 
+P2 <- ggplot(Gas.WashVsPre.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+  geom_point(alpha=.3)+
+  xlim(-4,4)+
+  scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+  xlab("Log2 FC Washout vs Pre")+
+  ylab("-Log10 FDR")+
+  ylim(0,8)+
+  theme.10+
+  theme(legend.position="none")
+
+
+# Wash vs Post 
+P3 <- ggplot(Gas.WashVsPost.I, aes(x=logFC, y=-log10(adj.P.Val), color=Sig))+
+  geom_point(alpha=.3)+
+  xlim(-4,4)+
+  scale_color_manual(values=c("grey20", "darkred"), name="Significance")+
+  xlab("Log2 FC Washout vs Post")+
+  ylab("-Log10 FDR")+
+  ylim(0,8)+
+  theme.10+
+  theme(legend.position="none")
+
+grid.arrange(P1, P3, P2, ncol=3)
+```
+&nbsp;  
+
+
+
+## Figure S3) Network plot of Gastroc modules  
+
+*This figure created by network plot script*
+
+
+\newpage  
+
+## Figure S4)  Expression of metabolism, neuronal, and immune genes associated with change in body weight.
+
+### A) Thermo, lipogenesis, neuronal genes plotted vs change in BW
+```{r, fig.height=8.5}
+
+combo <- unique(c(thermoBrownSig, TGsynthSig2$HGNCsymbol[1:16], "ANGPTL8", neuroSig2$HGNCsymbol[1:13] ))
+
+P<- plotGOIchVphenoCh(GOI=combo, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=6, title="A")
+P+xlab("Max % change in body weight")+
+  scale_x_continuous(breaks=c(-8, -18, -28), limits=c(-29.5, -7))+
+  # increase space around points in each plot
+  scale_y_continuous(breaks=scales::pretty_breaks(4), expand=expand_scale(mult=.15))
+
+
+proTherm <- c("ADIPOR2", "LIPA", "KDM3A", "KCNAB2", "UCP2", "MAOA", "PTGER3")
+
+```
+
+### B) Increased expression of NKT cell and macrophage markers assoc with FGF21-induced weight loss
+```{r NKT and mac genes assoc with change in body weight, fig.height=5.5}
+ImmCombo <- c(Imm1, Imm2)
+ImmCombo <- ImmCombo[!ImmCombo %in% c("INHBA", "PPARG", "TSLP")]
+
+P <- plotGOIchVphenoCh(GOI=ImmCombo, counts=voomCounts.AT, pheno="BWpctChange_Wash.w2", anno=annoAT, ncol=6, title="B")
+P + xlab("Max % change in body weight") +
+  scale_x_continuous(breaks=c(-8, -18, -28), limits=c(-29.5, -7))+
+  # increase space around points in each plot
+  scale_y_continuous(breaks=scales::pretty_breaks(4), expand=expand_scale(mult=.15))
+
+```
+
+
+\newpage  
+
+## Figure S5) FAM19A4 treatment has no effect on body weight in mice.
+
+*Plots for this figure were made in Prism* 
+
+
+
+\newpage  
+
+## Figure S6) Sample identity was confirmed using tissue specific genes and genomic variants.  
+
+
+
+
+
+\newpage  
+# Supplementary Tables  
+
+
+## Table S1) DE analysis results for AT and SM.  
+
+```{r}
+
+LMgenes.Ch.regain <- read.csv("Results/FINAL/LMresults.AT.geneCh.predictRegain.csv") 
+
+# # combine results from all comparisons into one table
+AT.results.combo <- AT.PostVsPre.I %>% select("GeneID", "HGNCsymbol",  "AveExpr", "logFC", "P.Value","adj.P.Val" ) %>%
+  rename(AveExpr_AT_lcpm = AveExpr, Post.vs.Pre_logFC = logFC, Post.vs.Pre_Pval = P.Value , Post.vs.Pre_FDR = adj.P.Val) %>%
+  left_join(AT.WashVsPost.I[,c("GeneID", "logFC", "P.Value", "adj.P.Val")], by="GeneID") %>%
+  rename(Wash.vs.Post_logFC = logFC, Wash.vs.Post_Pval = P.Value, Wash.vs.Post_FDR = adj.P.Val)  %>%
+  left_join(AT.WashVsPre.I[,c("GeneID", "logFC", "P.Value", "adj.P.Val")], by="GeneID") %>%
+  rename(Wash.vs.Pre_logFC = logFC, Wash.vs.Pre_Pval = P.Value, Wash.vs.Pre_FDR = adj.P.Val) %>%
+  # add in assoc with change in body weight
+  left_join(LMgenes.Change.treat[,c("GeneID", "BW.Est", "BW.Pval", "BW.adjPval")], by="GeneID") %>%
+  rename(BWloss_Est = BW.Est, BWloss_Pval=BW.Pval, BWloss_FDR=BW.adjPval) %>%
+  left_join(LMgenes.Ch.regain[,c("GeneID", "BW.Est", "BW.Pval", "BW.adjPval")], by="GeneID") %>%
+  rename(BWregain_Est = BW.Est, BWregain_Pval=BW.Pval, BWregain_FDR=BW.adjPval)
+
+# reformat
+AT.results.combo[,c(5,6,8,9,11,12,14,15,17,18)] <- apply(AT.results.combo[,c(5,6,8,9,11,12,14,15,17,18)], 2, function(x) signif(x, 2))
+AT.results.combo[,c(3,4,7,10,13,16)] <- apply(AT.results.combo[,c(3,4,7,10,13,16)], 2, function(x) signif(x, 1))
+
+# write.csv(AT.results.combo, "Results/FINAL/SuppTables/Adipose_DEGand BW_full_list.csv")
+
+
+## Gastroc
+
+
+# This table is not made yet, might not include in paper.
+# LM.Gas.geneCh.predictRegain <- read.csv("Results/Final Paper/LM.Gas.geneCh.predictRegain.csv")
+
+
+Gas.results.combo <- Gas.PostVsPre.I %>% select("GeneID", "HGNCsymbol",  "AveExpr", "logFC", "P.Value","adj.P.Val" ) %>%
+  rename(AveExpr_SM_lcpm = AveExpr, Post.vs.Pre_logFC = logFC, Post.vs.Pre_Pval = P.Value , Post.vs.Pre_FDR = adj.P.Val) %>%
+  left_join(Gas.WashVsPost.I[,c("GeneID", "logFC", "P.Value", "adj.P.Val")], by="GeneID") %>%
+  rename(Wash.vs.Post_logFC = logFC, Wash.vs.Post_Pval = P.Value, Wash.vs.Post_FDR = adj.P.Val)  %>%
+  left_join(Gas.WashVsPre.I[,c("GeneID", "logFC", "P.Value", "adj.P.Val")], by="GeneID") %>%
+  rename(Wash.vs.Pre_logFC = logFC, Wash.vs.Pre_Pval = P.Value, Wash.vs.Pre_FDR = adj.P.Val) %>%
+# add in assoc with change in body weight
+  left_join(LMgenes.Change.treat[,c("GeneID", "BW.Est", "BW.Pval", "BW.adjPval")], by="GeneID") %>%
+  rename(BWloss_Est = BW.Est, BWloss_Pval=BW.Pval, BWloss_FDR=BW.adjPval)
+
+Gas.results.combo[,c(5,6,8,9,11,12,14,15)] <- apply(Gas.results.combo[,c(5,6,8,9,11,12,14,15)], 2, function(x) signif(x, 2))
+Gas.results.combo[,c(3,4,7,10,13)] <- apply(Gas.results.combo[,c(3,4,7,10,13)], 2, function(x) signif(x, 1))
+
+ # write.csv(Gas.results.combo, "Results/FINAL/SuppTables/Muscle_DEGandBW_full_list.csv")
+
+
+```
+
+### A) Adipose  
+
+*Preview:*  
+```{r, out.width = "500px"}
+knitr::include_graphics("PAPER/Supp Info/previews/AT_DEG.png")
+```
+
+### B) Gastroc  
+
+*Preview:*  
+```{r, out.width = "500px"}
+knitr::include_graphics("PAPER/Supp Info/previews/SM_DEG.png")
+```
+
+
+\newpage  
+## Table S2) Pathway enrichment amongst top DE genes in AT.  
+
+### A) Adipose Post vs Pre  
+*Preview:*  
+
+```{r, out.width = "400px"}
+knitr::include_graphics("PAPER/Supp Info/previews/AT_pvp_pathway.png")
+```
+
+### B) Adipose Post vs Pre and BW change  
+*Preview:* 
+```{r, out.width = "400px"}
+knitr::include_graphics("PAPER/Supp Info/previews/AT_pvp_BW_pways.png")
+```
+
+
+
+\newpage  
+## Table S3) Annotation of all WGCNA modules.  
+
+```{r}
+###  This is for paper figure, but previous analysis included specific OB gene set collection.
+
+
+# ### ADIPOSE ####
+# 
+# # currently working with which modules?
+# geneInfo <- read.csv("Results/FINAL/WGCNA/AT.allgenes.Mods.csv")
+# geneInfo <- geneInfo[,-1]
+# 
+# # read in gene sets
+# GObioProc <- readRDS(paste0(whereIam, "PROJECTS/Genes/Broad/GO_bioProcessGS_human.rds"))
+# Canon <- readRDS(paste0(whereIam, "PROJECTS/Genes/Broad/CanonGS_human.rds"))
+# Hallmark.GS <- readRDS(paste0(whereIam,"/PROJECTS/Genes/Broad/HallmarkGS.rds"))
+# OBtrim.GS <- readRDS(paste0(whereIam,"/PROJECTS/Genes/Broad/ObesityTrimmed.GS.rds"))
+# OB <- OBtrim.GS[!names(OBtrim.GS) %in% names(Canon)]
+# OB <- OB[!grepl("IPA.NE|combo", names(OB))]
+# 
+# # filter based on adipose expression
+# GObioProc.filt <- filterGeneSets.ensg(counts=geneInfo, geneSets=GObioProc, cutoff=10)
+# GObioProc.filt$setsRemoved
+# GObioProc <- GObioProc.filt$geneSets.filtered
+# 
+# canOB <- c(Canon, Hallmark.GS, OB)
+# 
+# canOB.filt <- filterGeneSets.ensg(counts=geneInfo, geneSets=canOB, cutoff=10)
+# canOB.filt$setsRemoved
+# canOB <- canOB.filt$geneSets.filtered
+# 
+# 
+# 
+# # run annotation function with each gene set collection
+# # GO biological processes
+# modAnno.GO <- annotateModules(geneInfo, geneSets=GObioProc, nTopMod=10)
+# 
+# # filter down to significant annotations. cutoff = ...
+# modAnno.GOtrim <- as.data.frame(modAnno.GO$FDRtable)
+# modAnno.GOtrim$GeneSet <- rownames(modAnno.GOtrim)
+# 
+# modAnno.GOtrim <- gather(modAnno.GOtrim, "Module", "FDR", 1:72) %>%
+#                   filter(FDR < .1) %>%
+#                   arrange(Module, FDR)
+# 
+# table(modAnno.GOtrim$Module)
+# length(unique(modAnno.GOtrim$Module))
+# 
+# # put on module number names
+# modAnno.GOtrim <- merge(AT.mod.names[,c("moduleColor", "modNumber")], modAnno.GOtrim, by.x="moduleColor", by.y="Module", all.x=TRUE)
+# modAnno.GOtrim <- modAnno.GOtrim %>% rename(Module = modNumber) %>%
+#                   select(Module:FDR) 
+# 
+# # replace NAs with "no significant annotations"
+# modAnno.GOtrim$GeneSet[is.na(modAnno.GOtrim$GeneSet)] <- "No significant overlap"
+# noOverlap <- modAnno.GOtrim %>% filter(is.na(FDR))
+# 
+# # trim further to only top 10 or top 25 entries for each module?
+# modAnno.GOtrim <- modAnno.GOtrim %>% group_by(Module) %>%
+#                   top_n(n=-10, wt=FDR)
+# # table(modAnno.GOtrim$Module)
+# 
+# #stick no overlaps back on and arrange by module number
+# modAnno.GOtrim <- modAnno.GOtrim %>% 
+#                       bind_rows(noOverlap) %>%
+#                       arrange(as.numeric(str_split_fixed(Module, "_", 2)[,2]), FDR) 
+# 
+# 
+# #write to file (two places.  *** modify file name with gene set collection used!
+# modAnnoFileName <- paste0("Results/FINAL/WGCNA/", "AT.ModAnno.GObioProc.csv")
+# write.csv(modAnno.GOtrim, modAnnoFileName)
+# 
+# modAnnoFileName <- paste0("PAPER/Supp Info/", "AT.ModAnno.GObioProc.csv")
+# write.csv(modAnno.GOtrim, modAnnoFileName)
+# 
+# 
+# # canonical and OB related gene sets
+# modAnno.Canon <- annotateModules(geneInfo, geneSets=canOB, nTopMod=10)
+# 
+# # filter down to significant annotations. cutoff = ...
+# modAnno.CanonTrim <- as.data.frame(modAnno.Canon$FDRtable)
+# modAnno.CanonTrim$GeneSet <- rownames(modAnno.CanonTrim)
+# 
+# modAnno.CanonTrim <- gather(modAnno.CanonTrim, "Module", "FDR", 1:72) %>%
+#                   filter(FDR < .1) %>%
+#                   arrange(Module, FDR)
+# 
+# table(modAnno.CanonTrim$Module)
+# length(unique(modAnno.CanonTrim$Module))
+# 
+# # put on module number names
+# modAnno.CanonTrim <- merge(AT.mod.names[,c("moduleColor", "modNumber")], modAnno.CanonTrim, by.x="moduleColor", by.y="Module", all.x=TRUE)
+# modAnno.CanonTrim <- modAnno.CanonTrim %>% rename(Module = modNumber) %>%
+#                   select(Module:FDR) 
+# 
+# # replace NAs with "no significant annotations"
+# modAnno.CanonTrim$GeneSet[is.na(modAnno.CanonTrim$GeneSet)] <- "No significant overlap"
+# noOverlap <- modAnno.CanonTrim %>% filter(is.na(FDR))
+# 
+# # trim further to only top 10 or top 25 entries for each module?
+# modAnno.CanonTrim <- modAnno.CanonTrim %>% group_by(Module) %>%
+#                   top_n(n=-10, wt=FDR) 
+# # table(modAnno.CanonTrim$Module)
+# 
+# #stick no overlaps back on
+# modAnno.CanonTrim <- modAnno.CanonTrim %>% 
+#                       bind_rows(noOverlap) %>%
+#                       arrange(as.numeric(str_split_fixed(Module, "_", 2)[,2]), FDR)
+# 
+# #write to file (two places.  *** modify file name with gene set collection used!
+# modAnnoFileName <- paste0("Results/FINAL/WGCNA/", "AT.ModAnno.Canon.csv")
+# write.csv(modAnno.CanonTrim, modAnnoFileName)
+# 
+# modAnnoFileName <- paste0("PAPER/Supp Info/", "AT.ModAnno.Canon.csv")
+# write.csv(modAnno.CanonTrim, modAnnoFileName)
+# 
+# 
+# 
+# ### GASTROC ####
+# 
+# # currently working with which modules?
+# geneInfo <- read.csv("Results/FINAL/WGCNA/Musc.allgenes.Mods.csv")
+# geneInfo <- geneInfo[,-1]
+# 
+# # read in gene sets
+# GObioProc <- readRDS(paste0(whereIam, "PROJECTS/Genes/Broad/GO_bioProcessGS_human.rds"))
+# Canon <- readRDS(paste0(whereIam, "PROJECTS/Genes/Broad/CanonGS_human.rds"))
+# Hallmark.GS <- readRDS(paste0(whereIam,"/PROJECTS/Genes/Broad/HallmarkGS.rds"))
+# OBtrim.GS <- readRDS(paste0(whereIam,"/PROJECTS/Genes/Broad/ObesityTrimmed.GS.rds"))
+# OB <- OBtrim.GS[!names(OBtrim.GS) %in% names(Canon)]
+# OB <- OB[!grepl("IPA.NE|combo", names(OB))]
+# 
+# # filter based on Gastroc expression
+# GObioProc.filt <- filterGeneSets.ensg(counts=geneInfo, geneSets=GObioProc, cutoff=10)
+# GObioProc.filt$setsRemoved
+# GObioProc <- GObioProc.filt$geneSets.filtered
+# 
+# canOB <- c(Canon, Hallmark.GS, OB)
+# 
+# canOB.filt <- filterGeneSets.ensg(counts=geneInfo, geneSets=canOB, cutoff=10)
+# canOB.filt$setsRemoved
+# canOB <- canOB.filt$geneSets.filtered
+# 
+# 
+# 
+# # run annotation function with each gene set collection
+# # GO biological processes
+# modAnno.GO <- annotateModules(geneInfo, geneSets=GObioProc, nTopMod=10)
+# 
+# # filter down to significant annotations. cutoff = ...
+# modAnno.GOtrim <- as.data.frame(modAnno.GO$FDRtable)
+# modAnno.GOtrim$GeneSet <- rownames(modAnno.GOtrim)
+# 
+# modAnno.GOtrim <- gather(modAnno.GOtrim, "Module", "FDR", 1:30) %>%
+#                   filter(FDR < .1) %>%
+#                   arrange(Module, FDR)
+# 
+# table(modAnno.GOtrim$Module)
+# length(unique(modAnno.GOtrim$Module))
+# 
+# # put on module number names
+# modAnno.GOtrim <- merge(Gas.mod.names[,c("moduleColor", "modNumber")], modAnno.GOtrim, by.x="moduleColor", by.y="Module", all.x=TRUE)
+# modAnno.GOtrim <- modAnno.GOtrim %>% rename(Module = modNumber) %>%
+#                   select(Module:FDR) 
+# 
+# # replace NAs with "no significant annotations"
+# modAnno.GOtrim$GeneSet[is.na(modAnno.GOtrim$GeneSet)] <- "No significant overlap"
+# noOverlap <- modAnno.GOtrim %>% filter(is.na(FDR))
+# 
+# # trim further to only top 10 or top 25 entries for each module?
+# modAnno.GOtrim <- modAnno.GOtrim %>% group_by(Module) %>%
+#                   top_n(n=-10, wt=FDR)
+# # table(modAnno.GOtrim$Module)
+# 
+# #stick no overlaps back on and arrange by module number
+# modAnno.GOtrim <- modAnno.GOtrim %>% 
+#                       bind_rows(noOverlap) %>%
+#                       arrange(as.numeric(str_split_fixed(Module, "_", 2)[,2]), FDR) 
+# 
+# 
+# #write to file (two places.  *** modify file name with gene set collection used!
+# modAnnoFileName <- paste0("Results/FINAL/WGCNA/", "Gas.ModAnno.GObioProc.csv")
+# write.csv(modAnno.GOtrim, modAnnoFileName)
+# 
+# modAnnoFileName <- paste0("PAPER/Supp Info/", "Gas.ModAnno.GObioProc.csv")
+# write.csv(modAnno.GOtrim, modAnnoFileName)
+# 
+# 
+# # canonical and OB related gene sets
+# modAnno.Canon <- annotateModules(geneInfo, geneSets=canOB, nTopMod=10)
+# 
+# # filter down to significant annotations. cutoff = ...
+# modAnno.CanonTrim <- as.data.frame(modAnno.Canon$FDRtable)
+# modAnno.CanonTrim$GeneSet <- rownames(modAnno.CanonTrim)
+# 
+# modAnno.CanonTrim <- gather(modAnno.CanonTrim, "Module", "FDR", 1:30) %>%
+#                   filter(FDR < .1) %>%
+#                   arrange(Module, FDR)
+# 
+# table(modAnno.CanonTrim$Module)
+# length(unique(modAnno.CanonTrim$Module))
+# 
+# # put on module number names
+# modAnno.CanonTrim <- merge(Gas.mod.names[,c("moduleColor", "modNumber")], modAnno.CanonTrim, by.x="moduleColor", by.y="Module", all.x=TRUE)
+# modAnno.CanonTrim <- modAnno.CanonTrim %>% rename(Module = modNumber) %>%
+#                   select(Module:FDR) 
+# 
+# # replace NAs with "no significant annotations"
+# modAnno.CanonTrim$GeneSet[is.na(modAnno.CanonTrim$GeneSet)] <- "No significant overlap"
+# noOverlap <- modAnno.CanonTrim %>% filter(is.na(FDR))
+# 
+# # trim further to only top 10 or top 25 entries for each module?
+# modAnno.CanonTrim <- modAnno.CanonTrim %>% group_by(Module) %>%
+#                   top_n(n=-10, wt=FDR) 
+# # table(modAnno.CanonTrim$Module)
+# 
+# #stick no overlaps back on
+# modAnno.CanonTrim <- modAnno.CanonTrim %>% 
+#                       bind_rows(noOverlap) %>%
+#                       arrange(as.numeric(str_split_fixed(Module, "_", 2)[,2]), FDR)
+# 
+# #write to file (two places.  *** modify file name with gene set collection used!
+# modAnnoFileName <- paste0("Results/FINAL/WGCNA/", "Gas.ModAnno.Canon.csv")
+# write.csv(modAnno.CanonTrim, modAnnoFileName)
+# 
+# modAnnoFileName <- paste0("PAPER/Supp Info/", "Gas.ModAnno.Canon.csv")
+# write.csv(modAnno.CanonTrim, modAnnoFileName)
+
+
+```
+
+### A) AT module annotation  
+*Preview:*  
+```{r, out.width = "400px"}
+knitr::include_graphics("PAPER/Supp Info/previews/AT_modAnno_canonOB.png")
+```
+
+### B) SM module annotation  
+*Preview:*  
+```{r, out.width = "400px"}
+knitr::include_graphics("PAPER/Supp Info/previews/Gas_modAnno_CanonOB.png")
+```
+
+
+
+
+
+
+\newpage
+## Table S4) WGCNA module membership  
+
+```{r}
+AT.mods2 <- AT.mods %>% 
+  select(modNumber, modSize, GeneID, HGNCsymbol) %>%
+  arrange(str_split_fixed(modNumber, "_",2)[,2], HGNCsymbol) %>%
+  rename(Module = modNumber, moduleSize = modSize)
+
+# write.csv(AT.mods2, "Results/FINAL/WGCNA/AT_MM_module_numbers.csv", row.names=FALSE)
+
+# make a truncated table for supp table preview
+AT.mods2.trunc <- AT.mods2 %>% 
+  mutate(rando = sample(1:nrow(AT.mods2))) %>%
+  group_by(Module) %>%
+  top_n( 50, rando) %>%
+  select(-rando)
+
+# write.csv(AT.mods2.trunc, "Results/FINAL/WGCNA/AT_MM_module_numbers_trunc.csv", row.names=FALSE)
+
+
+
+Gas.mods2 <- Gas.mods %>%
+  select(modNumber, modSize, GeneID, HGNCsymbol) %>%
+  arrange(str_split_fixed(modNumber, "_",2)[,2], HGNCsymbol) %>%
+  rename(Module = modNumber, moduleSize = modSize)
+
+# write.csv(Gas.mods2, "Results/FINAL/WGCNA/Gas.NEW_MM_module_numbers.csv", row.names=FALSE)
+
+# make a truncated table for supp table preview
+Gas.mods2.trunc <- Gas.mods2 %>% 
+  mutate(rando = sample(1:nrow(Gas.mods2))) %>%
+  group_by(Module) %>%
+  top_n( 50, rando) %>%
+  select(-rando)
+
+# write.csv(Gas.mods2.trunc, "Results/FINAL/WGCNA/Gas.NEW_MM_module_numbers_trunc.csv", row.names=FALSE)
+
+
+```
+### A) Adipose gene module membership  
+*Preview:*  
+```{r, out.width = "300px"}
+knitr::include_graphics("PAPER/Supp Info/previews/Gas_modMembership.png")
+```
+
+### B) Skeletal muscle gene module membership  
+*Preview:*  
+```{r, out.width = "300px"}
+knitr::include_graphics("PAPER/Supp Info/previews/AT_modMembership.png")
+```
+
+
+\newpage
+
+## Table S5) Differentially expressed modules.  
+
+```{r}
+
+# # gather DE and linear model results tables for modules
+# 
+# # adipose
+# # pre v post gene vs max ch BW
+# AT.BWloss <- read.csv("Results/FINAL/WGCNA/LMresults.AT.treat.BW.TAG.maxCh.csv") 
+# 
+# 
+# AT.BWloss %>% select(Module, BW.Est:BW.adjPval) %>%
+#   left_join(AT.DEmods.w, by="Module") %>%
+#   select(modNumber, BW.Est:BW.adjPval, PostvPre.pval:WashvPost.adjP) %>%
+#   rename(Module = modNumber) %>%
+#   arrange(as.numeric(str_split_fixed(Module, "_",2)[,2]))-> ATmod.results
+# 
+# names(ATmod.results) <- gsub(".adjPval|.adjP", "_FDR", names(ATmod.results))
+# names(ATmod.results) <- gsub(".pval", "_Pval", names(ATmod.results))
+# names(ATmod.results) <- gsub("\\.", "_", names(ATmod.results))
+# 
+# 
+# write.csv(ATmod.results, "PAPER/Supp Info/AT_DE_modules.csv")
+# 
+# 
+# 
+# gastroc
+# pre v post gene vs max ch BW
+Gas.BWloss <- read.csv("Results/FINAL/WGCNA/LMresults.Gas.NEW.modCh.loss.csv")
+
+Gas.BWloss %>% select(Module, BW.Est:BW.adjPval) %>%
+  left_join(Gas.DEmods.w, by="Module") %>%
+  select(modNumber, BW.Est:BW.adjPval, PostvPre.pval:WashvPost.adjP) %>%
+  rename(Module = modNumber) %>%
+  arrange(as.numeric(str_split_fixed(Module, "_",2)[,2])) -> Gas.mod.results
+
+names(Gas.mod.results) <- gsub(".adjPval|.adjP", "_FDR", names(Gas.mod.results))
+names(Gas.mod.results) <- gsub(".pval", "_Pval", names(Gas.mod.results))
+names(Gas.mod.results) <- gsub("\\.", "_", names(Gas.mod.results))
+
+
+# write.csv(Gas.mod.results, "PAPER/Supp Info/Gas.NEW_DEandBW_modules.csv")
+
+```
+
+### A) Differentially expressed AT modules  
+
+*Preview:*  
+```{r, out.width = "500px"}
+knitr::include_graphics("PAPER/Supp Info/previews/AT_DE_mods.png")
+```
+
+### B) Differentially expressed SM modules  
+
+*Preview:*
+```{r, out.width = "500px"}
+knitr::include_graphics("PAPER/Supp Info/previews/SM_DE_modules.png")
+```
+
+\newpage
+## Table S6) Thermogensis, Browning, and Innervation related gene sets.    
+
+ 
+```{r, out.width = "300px"}
+knitr::include_graphics("PAPER/Supp Info/previews/thermoBrownNeuro_GS.png")
+```
+
+
+
+# Figure legends are included with text
+
+
+
+
+
+
+
+
+
+
+
+
+
