@@ -12,33 +12,6 @@ editor_options:
 ---
 # Re-analysis and write-up of FGF21-treated NHP RNAseq data for publication
 
-*Note - this markdown is based on the file 'FGF21 and CalR CorNames2.Rmd', but cleaned up to contain only those analyses included in the paper.*
-
-## Previously steps   
-**QC and initial exploration with PCA**- check for batch effects, quality effects/outliers, and mixed up samples.
-
-
-## Summary
-**Goals**  
-
-**Samples**
-RNAseq from FGF21-treated NHP;  Pre, post, and wash-out time points; subq fat and gastrocnemius muscle
-
-**Analysis:** 
-
-**1. Analysis of FGF21-treated samples**
-  - DE gene expression with limma, p.hyper gene set enrichment
-  - Gene set analysis with limma
-  
-**2. WGCNA network analysis**   
-  - using obesity and metabolism-relevant gene sets to get story for publication
-  - using all genes to pull out genes/pathways/extracellular proteins associated with FGF21 Treatment  
-  
-**3. Analysis of phenotypical data **  
-  - gene signatures for percent change in bodyweight
-  
-**Results**  
-
 
 
 ```{r load packages, results='hide', message=FALSE, echo=FALSE} 
@@ -72,8 +45,8 @@ opts_chunk$set(fig.width=8, fig.height=4, cache = TRUE, echo=FALSE, warning=FALS
 whereIam <- str_split_fixed(getwd(),"PROJECTS",  2)[1] 
 
 # load some generic functions
-source(paste0(whereIam, "R stuff/Functions_general.R"))
-source(paste0(whereIam, "PROJECTS/Genes/phyper GS enrichment.2.R"))
+source(Functions_general.R")
+source(phyper GS enrichment.2.R")
 
 # load functions for this particular script
 source("FGF21 functions.R")
@@ -92,7 +65,7 @@ source("FGF21 functions.R")
 
 rawCountsPlusQC <- as.data.frame(read.csv("Data/FGF21_musc_fat_rawCounts.csv"))
 names(rawCountsPlusQC)[1] <- "MMG"
-rawCountsPlusQC <- rawCountsPlusQC %>%  select(MMG, 1:(ncol(rawCountsPlusQC)-1))  
+rawCountsPlusQC <- rawCountsPlusQC %>%  select(MMG, 1:ncol(rawCountsPlusQC))  
 
 colnames(rawCountsPlusQC) <- gsub("US-", "US.", colnames(rawCountsPlusQC))
 # head(rawCountsPlusQC[,1:10])
